@@ -2,34 +2,94 @@
 
 set -ex
 
-venv=${1:-"tempest"}
+GATE_DEST=$BASE/new
+DEVSTACK_PATH=$GATE_DEST/devstack
 
-export DEVSTACK_LOCAL_CONFIG="enable_plugin neutron-lbaas https://git.openstack.org/openstack/neutron-lbaas"
+export DEVSTACK_LOCAL_CONFIG+="
+enable_plugin neutron-lbaas https://git.openstack.org/openstack/neutron-lbaas
+enable_plugin barbican https://git.openstack.org/openstack/barbican
+"
 
-# Override enabled services, so we can turn on lbaasv2.
-# While we're at it, disable cinder and swift, since we don't need them.
-s=""
-#s+="c-api,c-bak,c-sch,c-vol,"
-s+="ceilometer-acentral,ceilometer-acompute,ceilometer-alarm-evaluator"
-s+=",ceilometer-alarm-notifier,ceilometer-anotification,ceilometer-api"
-s+=",ceilometer-collector"
-#s+=",cinder"
-s+=",dstat"
-s+=",g-api,g-reg"
-s+=",h-api,h-api-cfn,h-api-cw,h-eng"
-s+=",heat"
-s+=",horizon"
-s+=",key"
-s+=",mysql"
-s+=",n-api,n-cond,n-cpu,n-crt,n-obj,n-sch"
-s+=",q-agt,q-dhcp,q-fwaas,q-l3,q-meta,q-metering,q-svc,q-vpn,quantum"
-s+=",q-lbaasv2"
-s+=",rabbit"
-#s+=",s-account,s-container,s-object,s-proxy"
-s+=",sahara"
-s+=",tempest"
-export OVERRIDE_ENABLED_SERVICES="$s"
+# Sort out our gate args
+. $(dirname "$0")/decode_args.sh
 
-if [ "$venv" == "tempest" ]; then
-    $BASE/new/devstack-gate/devstack-vm-gate.sh
-fi
+
+function _setup_octavia {
+    export DEVSTACK_LOCAL_CONFIG+="
+        enable_plugin octavia https://git.openstack.org/openstack/octavia
+        "
+    if [ "$testenv" != "apiv1" ]; then
+        ENABLED_SERVICES+="octavia,o-cw,o-hk,o-hm,o-api,"
+    fi
+    if [ "$testenv" = "apiv2" ]; then
+       cat > "$DEVSTACK_PATH/local.conf" <<EOF
+[[post-config|/etc/octavia/octavia.conf]]
+[DEFAULT]
+debug = True
+
+[controller_worker]
+amphora_driver = amphora_noop_driver
+compute_driver = compute_noop_driver
+network_driver = network_noop_driver
+
+EOF
+
+    fi
+
+    if [ "$testenv" = "scenario" ]; then
+       cat > "$DEVSTACK_PATH/local.conf" <<EOF
+[[post-config|/etc/octavia/octavia.conf]]
+[DEFAULT]
+debug = True
+
+EOF
+
+    fi
+}
+
+
+case "$testtype" in
+
+    "tempest")
+        # These are not needed with either v1 or v2
+        ENABLED_SERVICES+="-c-api,-c-bak,-c-sch,-c-vol,-cinder,"
+        ENABLED_SERVICES+="-s-account,-s-container,-s-object,-s-proxy,"
+
+        if [ "$testenv" != "scenario" ]; then
+            export DEVSTACK_LOCAL_CONFIG+="
+        DISABLE_AMP_IMAGE_BUILD=True
+        "
+            # Not needed for API tests
+            ENABLED_SERVICES+="-horizon,-ceilometer-acentral,-ceilometer-acompute,"
+            ENABLED_SERVICES+="-ceilometer-alarm-evaluator,-ceilometer-alarm-notifier,"
+            ENABLED_SERVICES+="-ceilometer-anotification,-ceilometer-api,"
+            ENABLED_SERVICES+="-ceilometer-collector,"
+        fi
+
+        if [ "$testenv" != "apiv1" ]; then
+            # Override enabled services, so we can turn on lbaasv2.
+            # While we're at it, disable cinder and swift, since we don't need them.
+            ENABLED_SERVICES+="q-lbaasv2,-q-lbaas,"
+
+            if [ "$lbaasdriver" = "namespace" ]; then
+                export DEVSTACK_LOCAL_CONFIG+="
+        NEUTRON_LBAAS_SERVICE_PROVIDERV2=LOADBALANCERV2:Haproxy:neutron_lbaas.drivers.haproxy.plugin_driver.HaproxyOnHostPluginDriver:default
+        "
+             fi
+        fi
+
+        if [ "$lbaasdriver" = "octavia" ]; then
+            _setup_octavia
+        fi
+
+        export ENABLED_SERVICES
+        ;;
+
+    *)
+        echo "Unrecognized test type $testtype".
+        exit 1
+        ;;
+esac
+
+
+"$GATE_DEST"/devstack-gate/devstack-vm-gate.sh

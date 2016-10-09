@@ -15,10 +15,10 @@
 import contextlib
 
 import mock
-from neutron.common import exceptions
 from neutron import context
 from neutron import manager
 from neutron.plugins.common import constants
+from neutron_lib import exceptions
 
 from neutron_lbaas.db.loadbalancer import loadbalancer_db
 from neutron_lbaas.services.loadbalancer.drivers.netscaler import ncc_client
@@ -60,19 +60,6 @@ class TestLoadBalancerPluginBase(test_db_loadbalancer
                                  .LoadBalancerPluginDbTestCase):
 
     def setUp(self):
-        super(TestLoadBalancerPluginBase, self).setUp(
-            lbaas_provider=LBAAS_PROVIDER)
-        loaded_plugins = manager.NeutronManager().get_service_plugins()
-        self.plugin_instance = loaded_plugins[constants.LOADBALANCER]
-
-
-class TestNetScalerPluginDriver(TestLoadBalancerPluginBase):
-
-    """Unit tests for the NetScaler LBaaS driver module."""
-
-    def setUp(self):
-        mock.patch.object(netscaler_driver, 'LOG').start()
-
         # mock the NSClient class (REST client)
         client_mock_cls = mock.patch(NCC_CLIENT_CLASS).start()
 
@@ -87,6 +74,19 @@ class TestNetScalerPluginDriver(TestLoadBalancerPluginBase):
         self.retrieve_resource_mock.side_effect = mock_retrieve_resource_func
         self.remove_resource_mock = self.client_mock_instance.remove_resource
         self.remove_resource_mock.side_effect = mock_remove_resource_func
+        super(TestLoadBalancerPluginBase, self).setUp(
+            lbaas_provider=LBAAS_PROVIDER)
+        loaded_plugins = manager.NeutronManager().get_service_plugins()
+        self.plugin_instance = loaded_plugins[constants.LOADBALANCER]
+
+
+class TestNetScalerPluginDriver(TestLoadBalancerPluginBase):
+
+    """Unit tests for the NetScaler LBaaS driver module."""
+
+    def setUp(self):
+        mock.patch.object(netscaler_driver, 'LOG').start()
+
         super(TestNetScalerPluginDriver, self).setUp()
         self.plugin_instance.drivers[LBAAS_PROVIDER_NAME] = (
             netscaler_driver.NetScalerPluginDriver(self.plugin_instance))

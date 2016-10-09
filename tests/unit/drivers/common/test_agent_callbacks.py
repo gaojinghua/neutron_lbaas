@@ -17,9 +17,10 @@ import mock
 
 from neutron import context
 from neutron.extensions import portbindings
-from neutron.openstack.common import uuidutils
 from neutron.plugins.common import constants
 from neutron.tests.unit import testlib_api
+from oslo_utils import uuidutils
+import six
 from six import moves
 
 from neutron_lbaas.db.loadbalancer import loadbalancer_dbv2 as ldb
@@ -59,7 +60,7 @@ class TestLoadBalancerCallbacks(
                 ready = self.callbacks.get_ready_devices(
                     context.get_admin_context(),
                 )
-                self.assertEqual(ready, [lb_id])
+                self.assertEqual([lb_id], ready)
 
     def test_get_ready_devices_multiple_listeners_and_loadbalancers(self):
         ctx = context.get_admin_context()
@@ -67,7 +68,7 @@ class TestLoadBalancerCallbacks(
         # add 3 load balancers and 2 listeners directly to DB
         # to create 2 "ready" devices and one load balancer without listener
         loadbalancers = []
-        for i in moves.xrange(3):
+        for i in moves.range(3):
             loadbalancers.append(ldb.models.LoadBalancer(
                 id=uuidutils.generate_uuid(), vip_subnet_id=self._subnet_id,
                 provisioning_status=constants.ACTIVE, admin_state_up=True,
@@ -94,14 +95,14 @@ class TestLoadBalancerCallbacks(
 
         ctx.session.flush()
 
-        self.assertEqual(ctx.session.query(ldb.models.LoadBalancer).count(), 3)
-        self.assertEqual(ctx.session.query(ldb.models.Listener).count(), 2)
+        self.assertEqual(3, ctx.session.query(ldb.models.LoadBalancer).count())
+        self.assertEqual(2, ctx.session.query(ldb.models.Listener).count())
         with mock.patch(
                 'neutron_lbaas.agent_scheduler.LbaasAgentSchedulerDbMixin'
                 '.list_loadbalancers_on_lbaas_agent') as mock_agent_lbs:
             mock_agent_lbs.return_value = loadbalancers
             ready = self.callbacks.get_ready_devices(ctx)
-            self.assertEqual(len(ready), 3)
+            self.assertEqual(3, len(ready))
             self.assertIn(loadbalancers[0].id, ready)
             self.assertIn(loadbalancers[1].id, ready)
             self.assertIn(loadbalancers[2].id, ready)
@@ -152,6 +153,7 @@ class TestLoadBalancerCallbacks(
             expected_lb['provider']['device_driver'] = 'dummy'
             subnet = self.plugin_instance.db._core_plugin.get_subnet(
                 ctx, expected_lb['vip_subnet_id'])
+            subnet = data_models.Subnet.from_dict(subnet).to_dict()
             expected_lb['vip_port']['fixed_ips'][0]['subnet'] = subnet
             del expected_lb['stats']
             self.assertEqual(expected_lb, load_balancer)
@@ -161,6 +163,8 @@ class TestLoadBalancerCallbacks(
 
         with self.loadbalancer() as loadbalancer:
             lb_id = loadbalancer['loadbalancer']['id']
+            if 'device_id' not in expected:
+                expected['device_id'] = lb_id
             self.plugin_instance.db.update_loadbalancer_provisioning_status(
                 context.get_admin_context(),
                 loadbalancer['loadbalancer']['id'])
@@ -168,13 +172,12 @@ class TestLoadBalancerCallbacks(
             db_lb = self.plugin_instance.db.get_loadbalancer(ctx, lb_id)
             func(ctx, port_id=db_lb.vip_port_id, **kwargs)
             db_port = core.get_port(ctx, db_lb.vip_port_id)
-            for k, v in expected.iteritems():
-                self.assertEqual(db_port[k], v)
+            for k, v in six.iteritems(expected):
+                self.assertEqual(v, db_port[k])
 
     def test_plug_vip_port(self):
         exp = {
             'device_owner': 'neutron:' + constants.LOADBALANCERV2,
-            'device_id': 'c596ce11-db30-5c72-8243-15acaae8690f',
             'admin_state_up': True
         }
         self._update_port_test_helper(
@@ -186,7 +189,6 @@ class TestLoadBalancerCallbacks(
     def test_plug_vip_port_mock_with_host(self):
         exp = {
             'device_owner': 'neutron:' + constants.LOADBALANCERV2,
-            'device_id': 'c596ce11-db30-5c72-8243-15acaae8690f',
             'admin_state_up': True,
             portbindings.HOST_ID: 'host'
         }

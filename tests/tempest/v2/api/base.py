@@ -1,4 +1,5 @@
-# Copyright 2015 Rackspace
+# Copyright 2015, 2016 Rackspace Inc.
+# All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -12,30 +13,50 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
 import time
-from neutron.i18n import _, _LI
+
+from oslo_log import log as logging
+from tempest.api.network import base
+from tempest import config
+from tempest.lib import exceptions
+
+from neutron_lbaas._i18n import _, _LI
 from neutron_lbaas.tests.tempest.v2.clients import health_monitors_client
 from neutron_lbaas.tests.tempest.v2.clients import listeners_client
 from neutron_lbaas.tests.tempest.v2.clients import load_balancers_client
 from neutron_lbaas.tests.tempest.v2.clients import members_client
 from neutron_lbaas.tests.tempest.v2.clients import pools_client
 
-from tempest.api.network import base
-from tempest import clients as tempest_clients
-from tempest import config
-from tempest import exceptions
-from tempest.openstack.common import log as logging
-
 CONF = config.CONF
 
-# Use local tempest conf if one is available.
-# This usually means we're running tests outside of devstack
-if os.path.exists('./tests/tempest/etc/dev_tempest.conf'):
-    CONF.set_config_path('./tests/tempest/etc/dev_tempest.conf')
+LOG = logging.getLogger(__name__)
+
+
+def _setup_client_args(auth_provider):
+    """Set up ServiceClient arguments using config settings. """
+    service = CONF.network.catalog_type or 'network'
+    region = CONF.network.region or 'regionOne'
+    endpoint_type = CONF.network.endpoint_type
+    build_interval = CONF.network.build_interval
+    build_timeout = CONF.network.build_timeout
+
+    # The disable_ssl appears in identity
+    disable_ssl_certificate_validation = (
+        CONF.identity.disable_ssl_certificate_validation)
+    ca_certs = None
+
+    # Trace in debug section
+    trace_requests = CONF.debug.trace_requests
+
+    return [auth_provider, service, region, endpoint_type,
+            build_interval, build_timeout,
+            disable_ssl_certificate_validation, ca_certs,
+            trace_requests]
 
 
 class BaseTestCase(base.BaseNetworkTest):
+
+    # This class picks non-admin credentials and run the tempest tests
 
     _lbs_to_delete = []
 
@@ -43,22 +64,22 @@ class BaseTestCase(base.BaseNetworkTest):
     def resource_setup(cls):
         super(BaseTestCase, cls).resource_setup()
 
-        credentials = cls.isolated_creds.get_primary_creds()
-        mgr = tempest_clients.Manager(credentials=credentials)
-        auth_provider = mgr.get_auth_provider(credentials)
-        client_args = [auth_provider, 'network', 'regionOne']
+        mgr = cls.get_client_manager()
+        auth_provider = mgr.auth_provider
+        client_args = _setup_client_args(auth_provider)
 
-        cls.load_balancers_client = \
-            load_balancers_client.LoadBalancersClientJSON(*client_args)
-        cls.listeners_client = \
-            listeners_client.ListenersClientJSON(*client_args)
+        cls.load_balancers_client = (
+            load_balancers_client.LoadBalancersClientJSON(*client_args))
+        cls.listeners_client = (
+            listeners_client.ListenersClientJSON(*client_args))
         cls.pools_client = pools_client.PoolsClientJSON(*client_args)
         cls.members_client = members_client.MembersClientJSON(*client_args)
-        cls.health_monitors_client = \
-            health_monitors_client.HealthMonitorsClientJSON(*client_args)
+        cls.health_monitors_client = (
+            health_monitors_client.HealthMonitorsClientJSON(*client_args))
 
     @classmethod
     def resource_cleanup(cls):
+
         for lb_id in cls._lbs_to_delete:
             try:
                 lb = cls.load_balancers_client.get_load_balancer_status_tree(
@@ -85,8 +106,8 @@ class BaseTestCase(base.BaseNetworkTest):
                 cls._try_delete_resource(cls.listeners_client.delete_listener,
                                          listener.get('id'))
                 cls._wait_for_load_balancer_status(lb_id)
-            cls._try_delete_resource(
-                cls.load_balancers_client.delete_load_balancer, lb_id)
+            cls._try_delete_resource(cls._delete_load_balancer, lb_id)
+
         super(BaseTestCase, cls).resource_cleanup()
 
     @classmethod
@@ -104,13 +125,13 @@ class BaseTestCase(base.BaseNetworkTest):
 
     @classmethod
     def _create_load_balancer(cls, wait=True, **lb_kwargs):
-        try:
-            lb = cls.load_balancers_client.create_load_balancer(**lb_kwargs)
-            if wait:
-                cls._wait_for_load_balancer_status(lb.get('id'))
-        except Exception:
-            raise Exception(_("Failed to create load balancer..."))
+        lb = cls.load_balancers_client.create_load_balancer(**lb_kwargs)
+        if wait:
+            cls._wait_for_load_balancer_status(lb.get('id'))
+
         cls._lbs_to_delete.append(lb.get('id'))
+        port = cls.ports_client.show_port(lb['vip_port_id'])
+        cls.ports.append(port['port'])
         return lb
 
     @classmethod
@@ -140,8 +161,8 @@ class BaseTestCase(base.BaseNetworkTest):
                                        provisioning_status='ACTIVE',
                                        operating_status='ONLINE',
                                        delete=False):
-        interval_time = 10
-        timeout = 300
+        interval_time = 1
+        timeout = 600
         end_time = time.time() + timeout
         lb = {}
         while time.time() < end_time:
@@ -169,15 +190,23 @@ class BaseTestCase(base.BaseNetworkTest):
                     # raise original exception
                     raise e
         else:
-            raise Exception(
-                _("Wait for load balancer ran for {timeout} seconds and did "
-                  "not observe {lb_id} reach {provisioning_status} "
-                  "provisioning status and {operating_status} "
-                  "operating status.").format(
-                      timeout=timeout,
-                      lb_id=load_balancer_id,
-                      provisioning_status=provisioning_status,
-                      operating_status=operating_status))
+            if delete:
+                raise exceptions.TimeoutException(
+                    _("Waited for load balancer {lb_id} to be deleted for "
+                      "{timeout} seconds but can still observe that it "
+                      "exists.").format(
+                          lb_id=load_balancer_id,
+                          timeout=timeout))
+            else:
+                raise exceptions.TimeoutException(
+                    _("Wait for load balancer ran for {timeout} seconds and "
+                      "did not observe {lb_id} reach {provisioning_status} "
+                      "provisioning status and {operating_status} "
+                      "operating status.").format(
+                          timeout=timeout,
+                          lb_id=load_balancer_id,
+                          provisioning_status=provisioning_status,
+                          operating_status=operating_status))
         return lb
 
     @classmethod
@@ -223,28 +252,28 @@ class BaseTestCase(base.BaseNetworkTest):
                 cls.load_balancer.get('id'))
         return pool
 
-    @classmethod
-    def _create_health_monitor(cls, wait=True, **health_monitor_kwargs):
-        hm = cls.health_monitors_client.create_health_monitor(
+    def _create_health_monitor(self, wait=True, cleanup=True,
+                               **health_monitor_kwargs):
+        hm = self.health_monitors_client.create_health_monitor(
             **health_monitor_kwargs)
+        if cleanup:
+            self.addCleanup(self._delete_health_monitor, hm.get('id'))
         if wait:
-            cls._wait_for_load_balancer_status(cls.load_balancer.get('id'))
+            self._wait_for_load_balancer_status(self.load_balancer.get('id'))
         return hm
 
-    @classmethod
-    def _delete_health_monitor(cls, health_monitor_id, wait=True):
-        cls.health_monitors_client.delete_health_monitor(health_monitor_id)
+    def _delete_health_monitor(self, health_monitor_id, wait=True):
+        self.health_monitors_client.delete_health_monitor(health_monitor_id)
         if wait:
-            cls._wait_for_load_balancer_status(cls.load_balancer.get('id'))
+            self._wait_for_load_balancer_status(self.load_balancer.get('id'))
 
-    @classmethod
-    def _update_health_monitor(cls, health_monitor_id, wait=True,
+    def _update_health_monitor(self, health_monitor_id, wait=True,
                                **health_monitor_kwargs):
-        health_monitor = cls.health_monitors_client.update_health_monitor(
+        health_monitor = self.health_monitors_client.update_health_monitor(
             health_monitor_id, **health_monitor_kwargs)
         if wait:
-            cls._wait_for_load_balancer_status(
-                cls.load_balancer.get('id'))
+            self._wait_for_load_balancer_status(
+                self.load_balancer.get('id'))
         return health_monitor
 
     @classmethod
@@ -318,3 +347,32 @@ class BaseTestCase(base.BaseNetworkTest):
             case_name=cls.__name__
         )
         return name
+
+
+class BaseAdminTestCase(BaseTestCase):
+
+    # This class picks admin credentials and run the tempest tests
+
+    @classmethod
+    def resource_setup(cls):
+
+        super(BaseAdminTestCase, cls).resource_setup()
+
+        mgr = cls.get_client_manager(credential_type='admin')
+        auth_provider_admin = mgr.auth_provider
+        client_args = _setup_client_args(auth_provider_admin)
+
+        cls.load_balancers_client = (
+            load_balancers_client.LoadBalancersClientJSON(*client_args))
+        cls.listeners_client = (
+            listeners_client.ListenersClientJSON(*client_args))
+        cls.pools_client = (
+            pools_client.PoolsClientJSON(*client_args))
+        cls.members_client = (
+            members_client.MembersClientJSON(*client_args))
+        cls.health_monitors_client = (
+            health_monitors_client.HealthMonitorsClientJSON(*client_args))
+
+    @classmethod
+    def resource_cleanup(cls):
+        super(BaseAdminTestCase, cls).resource_cleanup()

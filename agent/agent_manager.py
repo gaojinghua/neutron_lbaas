@@ -14,18 +14,18 @@
 #    under the License.
 
 from neutron.agent import rpc as agent_rpc
-from neutron.common import exceptions as n_exc
 from neutron import context as ncontext
-from neutron.i18n import _LE, _LI
-from neutron.openstack.common import loopingcall
-from neutron.openstack.common import periodic_task
 from neutron.plugins.common import constants
 from neutron.services import provider_configuration as provconfig
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
+from oslo_service import loopingcall
+from oslo_service import periodic_task
 from oslo_utils import importutils
 
+from neutron_lbaas._i18n import _, _LE, _LI
 from neutron_lbaas.agent import agent_api
 from neutron_lbaas.drivers.common import agent_driver_base
 from neutron_lbaas.services.loadbalancer import constants as lb_const
@@ -46,7 +46,7 @@ OPTS = [
 
 
 class DeviceNotFoundOnAgent(n_exc.NotFound):
-    msg = _('Unknown device with loadbalancer_id %(loadbalancer_id)s')
+    message = _('Unknown device with loadbalancer_id %(loadbalancer_id)s')
 
 
 class LbaasAgentManager(periodic_task.PeriodicTasks):
@@ -56,7 +56,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
     target = oslo_messaging.Target(version='1.0')
 
     def __init__(self, conf):
-        super(LbaasAgentManager, self).__init__()
+        super(LbaasAgentManager, self).__init__(conf)
         self.conf = conf
         self.context = ncontext.get_admin_context_without_session()
         self.serializer = agent_driver_base.DataModelSerializer()
@@ -323,7 +323,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
 
     def create_pool(self, context, pool):
         pool = data_models.Pool.from_dict(pool)
-        driver = self._get_driver(pool.listener.loadbalancer.id)
+        driver = self._get_driver(pool.loadbalancer.id)
         try:
             driver.pool.create(pool)
         except Exception:
@@ -334,7 +334,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
     def update_pool(self, context, old_pool, pool):
         pool = data_models.Pool.from_dict(pool)
         old_pool = data_models.Pool.from_dict(old_pool)
-        driver = self._get_driver(pool.listener.loadbalancer.id)
+        driver = self._get_driver(pool.loadbalancer.id)
         try:
             driver.pool.update(old_pool, pool)
         except Exception:
@@ -344,12 +344,12 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
 
     def delete_pool(self, context, pool):
         pool = data_models.Pool.from_dict(pool)
-        driver = self._get_driver(pool.listener.loadbalancer.id)
+        driver = self._get_driver(pool.loadbalancer.id)
         driver.pool.delete(pool)
 
     def create_member(self, context, member):
         member = data_models.Member.from_dict(member)
-        driver = self._get_driver(member.pool.listener.loadbalancer.id)
+        driver = self._get_driver(member.pool.loadbalancer.id)
         try:
             driver.member.create(member)
         except Exception:
@@ -361,7 +361,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
     def update_member(self, context, old_member, member):
         member = data_models.Member.from_dict(member)
         old_member = data_models.Member.from_dict(old_member)
-        driver = self._get_driver(member.pool.listener.loadbalancer.id)
+        driver = self._get_driver(member.pool.loadbalancer.id)
         try:
             driver.member.update(old_member, member)
         except Exception:
@@ -372,12 +372,12 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
 
     def delete_member(self, context, member):
         member = data_models.Member.from_dict(member)
-        driver = self._get_driver(member.pool.listener.loadbalancer.id)
+        driver = self._get_driver(member.pool.loadbalancer.id)
         driver.member.delete(member)
 
     def create_healthmonitor(self, context, healthmonitor):
         healthmonitor = data_models.HealthMonitor.from_dict(healthmonitor)
-        driver = self._get_driver(healthmonitor.pool.listener.loadbalancer.id)
+        driver = self._get_driver(healthmonitor.pool.loadbalancer.id)
         try:
             driver.healthmonitor.create(healthmonitor)
         except Exception:
@@ -391,7 +391,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
         healthmonitor = data_models.HealthMonitor.from_dict(healthmonitor)
         old_healthmonitor = data_models.HealthMonitor.from_dict(
             old_healthmonitor)
-        driver = self._get_driver(healthmonitor.pool.listener.loadbalancer.id)
+        driver = self._get_driver(healthmonitor.pool.loadbalancer.id)
         try:
             driver.healthmonitor.update(old_healthmonitor, healthmonitor)
         except Exception:
@@ -402,5 +402,5 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
 
     def delete_healthmonitor(self, context, healthmonitor):
         healthmonitor = data_models.HealthMonitor.from_dict(healthmonitor)
-        driver = self._get_driver(healthmonitor.pool.listener.loadbalancer.id)
+        driver = self._get_driver(healthmonitor.pool.loadbalancer.id)
         driver.healthmonitor.delete(healthmonitor)

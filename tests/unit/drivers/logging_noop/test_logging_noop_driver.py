@@ -43,7 +43,7 @@ def patch_manager(func):
         func(*args[:-1])
 
         s = str(log_mock.mock_calls[0])
-        parent.assertEqual(s[:11], "call.debug(")
+        parent.assertEqual("call.debug(", s[:11])
         parent.assertTrue(s.index(model.id) != -1,
                           msg="Model ID not found in log")
 
@@ -98,8 +98,17 @@ class LoadBalancerManagerTest(ManagerTestWithUpdates):
     def __init__(self, parent, manager, model):
         super(LoadBalancerManagerTest, self).__init__(parent, manager, model)
 
+        self.create_and_allocate_vip(model)
         self.refresh(model)
         self.stats(model)
+
+    @patch_manager
+    def allocates_vip(self):
+        self.manager.allocates_vip()
+
+    @patch_manager
+    def create_and_allocate_vip(self, model):
+        self.manager.create(self.parent.context, model)
 
     @patch_manager
     def refresh(self, model):
@@ -114,7 +123,7 @@ class LoadBalancerManagerTest(ManagerTestWithUpdates):
             "total_connections": 0
         }
         h = self.manager.stats(self.parent.context, model)
-        self.parent.assertEqual(h, dummy_stats)
+        self.parent.assertEqual(dummy_stats, h)
 
 
 class TestLoggingNoopLoadBalancerDriver(
@@ -123,11 +132,12 @@ class TestLoggingNoopLoadBalancerDriver(
     def _create_fake_models(self):
         id = 'name-001'
         lb = data_models.LoadBalancer(id=id)
+        pool = data_models.Pool(id=id, loadbalancer=lb)
         listener = data_models.Listener(id=id, loadbalancer=lb)
-        pool = data_models.Pool(id=id, listener=listener)
         member = data_models.Member(id=id, pool=pool)
         hm = data_models.HealthMonitor(id=id, pool=pool)
         lb.listeners = [listener]
+        lb.pools = [pool]
         listener.default_pool = pool
         pool.members = [member]
         pool.healthmonitor = hm

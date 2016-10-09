@@ -15,10 +15,10 @@
 import os
 import uuid
 
-from neutron.i18n import _LI, _LE
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from neutron_lbaas._i18n import _LI, _LE
 from neutron_lbaas.common.cert_manager import cert_manager
 from neutron_lbaas.common import exceptions
 
@@ -42,6 +42,7 @@ CONF.register_opts(local_cert_manager_opts, group='certificates')
 
 class Cert(cert_manager.Cert):
     """Representation of a Cert for local storage."""
+
     def __init__(self, certificate, private_key, intermediates=None,
                  private_key_passphrase=None):
         self.certificate = certificate
@@ -65,14 +66,14 @@ class Cert(cert_manager.Cert):
 class CertManager(cert_manager.CertManager):
     """Cert Manager Interface that stores data locally."""
 
-    @staticmethod
-    def store_cert(certificate, private_key, intermediates=None,
-                   private_key_passphrase=None, **kwargs):
+    def store_cert(self, project_id, certificate, private_key,
+                   intermediates=None, private_key_passphrase=None, **kwargs):
         """Stores (i.e., registers) a cert with the cert manager.
 
         This method stores the specified cert to the filesystem and returns
         a UUID that can be used to retrieve it.
 
+        :param project_id: Project ID for the owner of the certificate
         :param certificate: PEM encoded TLS certificate
         :param private_key: private key for the supplied certificate
         :param intermediates: ordered and concatenated intermediate certs
@@ -111,13 +112,14 @@ class CertManager(cert_manager.CertManager):
 
         return cert_ref
 
-    @staticmethod
-    def get_cert(cert_ref, **kwargs):
+    def get_cert(self, project_id, cert_ref, resource_ref, **kwargs):
         """Retrieves the specified cert.
 
+        :param project_id: Project ID for the owner of the certificate
         :param cert_ref: the UUID of the cert to retrieve
+        :param resource_ref: Full HATEOAS reference to the consuming resource
 
-        :return: neutron_lbaas.common.cert_manager.cert_manager.Cert
+        :returns: neutron_lbaas.common.cert_manager.cert_manager.Cert
                  representation of the certificate data
         :raises CertificateStorageException: if certificate retrieval fails
         """
@@ -169,11 +171,12 @@ class CertManager(cert_manager.CertManager):
 
         return Cert(**cert_data)
 
-    @staticmethod
-    def delete_cert(cert_ref, **kwargs):
+    def delete_cert(self, project_id, cert_ref, resource_ref, **kwargs):
         """Deletes the specified cert.
 
+        :param project_id: Project ID for the owner of the certificate
         :param cert_ref: the UUID of the cert to delete
+        :param resource_ref: Full HATEOAS reference to the consuming resource
 
         :raises CertificateStorageException: if certificate deletion fails
         """

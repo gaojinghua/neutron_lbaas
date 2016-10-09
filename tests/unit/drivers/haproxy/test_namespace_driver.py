@@ -18,8 +18,8 @@ import contextlib
 import socket
 
 import mock
-from neutron.common import exceptions
 from neutron.plugins.common import constants
+from neutron_lib import exceptions
 
 from neutron_lbaas.drivers.haproxy import namespace_driver
 from neutron_lbaas.services.loadbalancer import data_models
@@ -37,14 +37,13 @@ class TestHaproxyNSDriver(base.BaseTestCase):
         conf.haproxy.user_group = 'test_group'
         conf.haproxy.send_gratuitous_arp = 3
         self.conf = conf
-        self.mock_importer = mock.patch.object(namespace_driver,
-                                               'importutils').start()
-
         self.rpc_mock = mock.Mock()
-        self.driver = namespace_driver.HaproxyNSDriver(
-            conf,
-            self.rpc_mock
-        )
+        with mock.patch(
+                'neutron.common.utils.load_class_by_alias_or_classname'):
+            self.driver = namespace_driver.HaproxyNSDriver(
+                conf,
+                self.rpc_mock
+            )
         self.vif_driver = mock.Mock()
         self.driver.vif_driver = self.vif_driver
         self._build_mock_data_models()
@@ -61,7 +60,8 @@ class TestHaproxyNSDriver(base.BaseTestCase):
                                 mac_address='12-34-56-78-9A-BC',
                                 fixed_ips=[fixed_ip])
         self.lb = data_models.LoadBalancer(id='lb1', listeners=[],
-                                           vip_port=port)
+                                           vip_port=port,
+                                           vip_address='10.0.0.1')
 
     def test_get_name(self):
         self.assertEqual(namespace_driver.DRIVER_NAME, self.driver.get_name())
@@ -241,7 +241,7 @@ class TestHaproxyNSDriver(base.BaseTestCase):
     def test_update(self):
         self.driver._get_state_file_path = mock.Mock(return_value='/path')
         self.driver._spawn = mock.Mock()
-        with mock.patch('__builtin__.open') as m_open:
+        with mock.patch('six.moves.builtins.open') as m_open:
             file_mock = mock.MagicMock()
             m_open.return_value = file_mock
             file_mock.__enter__.return_value = file_mock
@@ -313,7 +313,8 @@ class TestHaproxyNSDriver(base.BaseTestCase):
         self.driver._spawn = mock.Mock()
         self.driver.create(self.lb)
         self.driver._plug.assert_called_once_with(
-            namespace_driver.get_ns_name(self.lb.id), self.lb.vip_port)
+            namespace_driver.get_ns_name(self.lb.id),
+            self.lb.vip_port, self.lb.vip_address)
         self.driver._spawn.assert_called_once_with(self.lb)
 
     def test_deployable(self):
@@ -353,7 +354,7 @@ class TestHaproxyNSDriver(base.BaseTestCase):
         ret_val = self.driver.deployable(self.lb)
         self.assertTrue(ret_val)
 
-    @mock.patch('neutron.agent.linux.utils.ensure_dir')
+    @mock.patch('neutron.common.utils.ensure_dir')
     def test_get_state_file_path(self, ensure_dir):
         path = self.driver._get_state_file_path(self.lb.id, 'conf',
                                                 ensure_state_dir=False)
@@ -370,8 +371,8 @@ class TestHaproxyNSDriver(base.BaseTestCase):
         interface_name = 'tap-d4nc3'
         self.vif_driver.get_device_name.return_value = interface_name
         self.assertRaises(exceptions.PreexistingDeviceFailure,
-                          self.driver._plug,
-                          'ns1', self.lb.vip_port, reuse_existing=False)
+                          self.driver._plug, 'ns1', self.lb.vip_port,
+                          self.lb.vip_address, reuse_existing=False)
         device_exists.assert_called_once_with(interface_name,
                                               namespace='ns1')
         self.rpc_mock.plug_vip_port.assert_called_once_with(
@@ -380,7 +381,7 @@ class TestHaproxyNSDriver(base.BaseTestCase):
         device_exists.reset_mock()
         self.rpc_mock.plug_vip_port.reset_mock()
         mock_ns = ip_wrap.return_value
-        self.driver._plug('ns1', self.lb.vip_port)
+        self.driver._plug('ns1', self.lb.vip_port, self.lb.vip_address)
         self.rpc_mock.plug_vip_port.assert_called_once_with(
             self.lb.vip_port.id)
         device_exists.assert_called_once_with(interface_name,
@@ -408,7 +409,7 @@ class TestHaproxyNSDriver(base.BaseTestCase):
         self.vif_driver.unplug.assert_called_once_with(interface_name,
                                                        namespace='ns1')
 
-    @mock.patch('neutron.agent.linux.utils.ensure_dir')
+    @mock.patch('neutron.common.utils.ensure_dir')
     @mock.patch('neutron_lbaas.services.loadbalancer.drivers.haproxy.'
                 'jinja_cfg.save_config')
     @mock.patch('neutron.agent.linux.ip_lib.IPWrapper')
@@ -536,6 +537,7 @@ class BaseTestListenerManager(BaseTestLoadBalancerManager):
         self.listener2 = data_models.Listener(id='listener2')
         self.in_listener.loadbalancer = self.in_lb
         self.listener2.loadbalancer = self.in_lb
+        self.in_lb.listeners = [self.in_listener, self.listener2]
         self.refresh = self.driver.loadbalancer.refresh
 
 
@@ -581,7 +583,9 @@ class BaseTestPoolManager(BaseTestListenerManager):
         super(BaseTestPoolManager, self).setUp()
         self.in_pool = data_models.Pool(id='pool1')
         self.in_listener.default_pool = self.in_pool
-        self.in_pool.listener = self.in_listener
+        self.in_pool.loadbalancer = self.in_lb
+        self.in_pool.listeners = [self.in_listener]
+        self.in_lb.pools = [self.in_pool]
 
 
 class TestPoolManager(BaseTestPoolManager):
@@ -666,7 +670,7 @@ class TestNamespaceDriverModule(base.BaseTestCase):
     @mock.patch('neutron.agent.linux.utils.execute')
     def test_kill_pids_in_file(self, execute, exists):
         pid_path = '/var/lib/data'
-        with mock.patch('__builtin__.open') as m_open:
+        with mock.patch('six.moves.builtins.open') as m_open:
             exists.return_value = False
             file_mock = mock.MagicMock()
             m_open.return_value = file_mock

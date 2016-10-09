@@ -20,15 +20,14 @@ import socket
 import netaddr
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils as linux_utils
-from neutron.common import exceptions
 from neutron.common import utils as n_utils
-from neutron.i18n import _LI, _LE, _LW
 from neutron.plugins.common import constants
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
-from oslo_utils import importutils
 
+from neutron_lbaas._i18n import _, _LI, _LE, _LW
 from neutron_lbaas.agent import agent_device_driver
 from neutron_lbaas.services.loadbalancer import constants as lb_const
 from neutron_lbaas.services.loadbalancer import data_models
@@ -61,14 +60,16 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         self.state_path = os.path.join(
             self.conf.haproxy.loadbalancer_state_path, STATE_PATH_V2_APPEND)
         try:
-            vif_driver = importutils.import_object(conf.interface_driver, conf)
+            vif_driver_class = n_utils.load_class_by_alias_or_classname(
+                'neutron.interface_drivers',
+                conf.interface_driver)
         except ImportError:
             with excutils.save_and_reraise_exception():
                 msg = (_('Error importing interface driver: %s')
                        % conf.interface_driver)
                 LOG.error(msg)
 
-        self.vif_driver = vif_driver
+        self.vif_driver = vif_driver_class(conf)
         self.deployed_loadbalancers = {}
         self._loadbalancer = LoadBalancerManager(self)
         self._listener = ListenerManager(self)
@@ -104,7 +105,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         cleanup_namespace = kwargs.get('cleanup_namespace', False)
         delete_namespace = kwargs.get('delete_namespace', False)
         namespace = get_ns_name(loadbalancer_id)
-        pid_path = self._get_state_file_path(loadbalancer_id, 'pid')
+        pid_path = self._get_state_file_path(loadbalancer_id, 'haproxy.pid')
 
         # kill the process
         kill_pids_in_file(pid_path)
@@ -153,15 +154,15 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             lb_stats['members'] = self._get_servers_stats(parsed_stats)
             return lb_stats
         else:
-            LOG.warn(_LW('Stats socket not found for loadbalancer %s') %
-                     loadbalancer_id)
+            LOG.warning(_LW('Stats socket not found for loadbalancer %s'),
+                        loadbalancer_id)
             return {}
 
     @n_utils.synchronized('haproxy-driver')
     def deploy_instance(self, loadbalancer):
         """Deploys loadbalancer if necessary
 
-        :return: True if loadbalancer was deployed, False otherwise
+        :returns: True if loadbalancer was deployed, False otherwise
         """
         if not self.deployable(loadbalancer):
             LOG.info(_LI("Loadbalancer %s is not deployable.") %
@@ -198,7 +199,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
     def create(self, loadbalancer):
         namespace = get_ns_name(loadbalancer.id)
 
-        self._plug(namespace, loadbalancer.vip_port)
+        self._plug(namespace, loadbalancer.vip_port, loadbalancer.vip_address)
         self._spawn(loadbalancer)
 
     def deployable(self, loadbalancer):
@@ -227,7 +228,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
 
             return self._parse_stats(raw_stats)
         except socket.error as e:
-            LOG.warn(_LW('Error while connecting to stats socket: %s'), e)
+            LOG.warning(_LW('Error while connecting to stats socket: %s'), e)
             return {}
 
     def _parse_stats(self, raw_stats):
@@ -272,10 +273,10 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         confs_dir = os.path.abspath(os.path.normpath(self.state_path))
         conf_dir = os.path.join(confs_dir, loadbalancer_id)
         if ensure_state_dir:
-            linux_utils.ensure_dir(conf_dir)
+            n_utils.ensure_dir(conf_dir)
         return os.path.join(conf_dir, kind)
 
-    def _plug(self, namespace, port, reuse_existing=True):
+    def _plug(self, namespace, port, vip_address, reuse_existing=True):
         self.plugin_rpc.plug_vip_port(port.id)
 
         interface_name = self.vif_driver.get_device_name(port)
@@ -302,6 +303,12 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         ]
         self.vif_driver.init_l3(interface_name, cidrs, namespace=namespace)
 
+        # Haproxy socket binding to IPv6 VIP address will fail if this address
+        # is not yet ready(i.e tentative address).
+        if netaddr.IPAddress(vip_address).version == 6:
+            device = ip_lib.IPDevice(interface_name, namespace=namespace)
+            device.addr.wait_until_address_ready(vip_address)
+
         gw_ip = port.fixed_ips[0].subnet.gateway_ip
 
         if not gw_ip:
@@ -310,8 +317,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
                 if host_route.destination == "0.0.0.0/0":
                     gw_ip = host_route.nexthop
                     break
-
-        if gw_ip:
+        else:
             cmd = ['route', 'add', 'default', 'gw', gw_ip]
             ip_wrapper = ip_lib.IPWrapper(namespace=namespace)
             ip_wrapper.netns.execute(cmd, check_exit_code=False)
@@ -413,14 +419,17 @@ class ListenerManager(agent_device_driver.BaseListenerManager):
 class PoolManager(agent_device_driver.BasePoolManager):
 
     def update(self, old_pool, new_pool):
-        self.driver.loadbalancer.refresh(new_pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(new_pool.loadbalancer)
 
     def create(self, pool):
-        self.driver.loadbalancer.refresh(pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(pool.loadbalancer)
 
     def delete(self, pool):
-        loadbalancer = pool.listener.loadbalancer
-        pool.listener.default_pool = None
+        loadbalancer = pool.loadbalancer
+        for l in loadbalancer.listeners:
+            if l.default_pool == pool:
+                l.default_pool = None
+        # TODO(sbalukoff): Will need to do this or L7Policies as well
         # just refresh because haproxy is fine if only frontend is listed
         self.driver.loadbalancer.refresh(loadbalancer)
 
@@ -435,27 +444,27 @@ class MemberManager(agent_device_driver.BaseMemberManager):
         pool.members.pop(index_to_remove)
 
     def update(self, old_member, new_member):
-        self.driver.loadbalancer.refresh(new_member.pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(new_member.pool.loadbalancer)
 
     def create(self, member):
-        self.driver.loadbalancer.refresh(member.pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(member.pool.loadbalancer)
 
     def delete(self, member):
         self._remove_member(member.pool, member.id)
-        self.driver.loadbalancer.refresh(member.pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(member.pool.loadbalancer)
 
 
 class HealthMonitorManager(agent_device_driver.BaseHealthMonitorManager):
 
     def update(self, old_hm, new_hm):
-        self.driver.loadbalancer.refresh(new_hm.pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(new_hm.pool.loadbalancer)
 
     def create(self, hm):
-        self.driver.loadbalancer.refresh(hm.pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(hm.pool.loadbalancer)
 
     def delete(self, hm):
         hm.pool.healthmonitor = None
-        self.driver.loadbalancer.refresh(hm.pool.listener.loadbalancer)
+        self.driver.loadbalancer.refresh(hm.pool.loadbalancer)
 
 
 def kill_pids_in_file(pid_path):
@@ -464,7 +473,7 @@ def kill_pids_in_file(pid_path):
             for pid in pids:
                 pid = pid.strip()
                 try:
-                    linux_utils.execute(['kill', '-9', pid])
+                    linux_utils.execute(['kill', '-9', pid], run_as_root=True)
                 except RuntimeError:
                     LOG.exception(
                         _LE('Unable to kill haproxy process: %s'),

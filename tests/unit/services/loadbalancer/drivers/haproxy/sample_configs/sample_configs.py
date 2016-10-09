@@ -19,6 +19,9 @@ RET_PERSISTENCE = {
     'type': 'HTTP_COOKIE',
     'cookie_name': 'HTTP_COOKIE'}
 
+HASHSEED_ORDERED_CODES = list({'404', '405', '500'})
+PIPED_CODES = '|'.join(HASHSEED_ORDERED_CODES)
+
 RET_MONITOR = {
     'id': 'sample_monitor_id_1',
     'type': 'HTTP',
@@ -27,7 +30,7 @@ RET_MONITOR = {
     'max_retries': 3,
     'http_method': 'GET',
     'url_path': '/index.html',
-    'expected_codes': '405|404|500',
+    'expected_codes': PIPED_CODES,
     'admin_state_up': True}
 
 RET_MEMBER_1 = {
@@ -98,17 +101,20 @@ RET_LISTENER_TLS_SNI = {
 RET_LB = {
     'name': 'test-lb',
     'vip_address': '10.0.0.2',
-    'listeners': [RET_LISTENER]}
+    'listeners': [RET_LISTENER],
+    'pools': [RET_POOL]}
 
 RET_LB_TLS = {
     'name': 'test-lb',
     'vip_address': '10.0.0.2',
-    'listeners': [RET_LISTENER_TLS]}
+    'listeners': [RET_LISTENER_TLS],
+    'pools': [RET_POOL]}
 
 RET_LB_TLS_SNI = {
     'name': 'test-lb',
     'vip_address': '10.0.0.2',
-    'listeners': [RET_LISTENER_TLS_SNI]}
+    'listeners': [RET_LISTENER_TLS_SNI],
+    'pools': [RET_POOL]}
 
 
 def sample_loadbalancer_tuple(proto=None, monitor=True, persistence=True,
@@ -116,7 +122,7 @@ def sample_loadbalancer_tuple(proto=None, monitor=True, persistence=True,
     proto = 'HTTP' if proto is None else proto
     in_lb = collections.namedtuple(
         'loadbalancer', 'id, name, vip_address, protocol, vip_port, '
-                        'listeners')
+                        'listeners, pools')
     return in_lb(
         id='sample_loadbalancer_id_1',
         name='test-lb',
@@ -127,7 +133,10 @@ def sample_loadbalancer_tuple(proto=None, monitor=True, persistence=True,
                                          persistence=persistence,
                                          persistence_type=persistence_type,
                                          tls=tls,
-                                         sni=sni)]
+                                         sni=sni)],
+        pools=[sample_pool_tuple(proto=proto, monitor=monitor,
+                                 persistence=persistence,
+                                 persistence_type=persistence_type)]
     )
 
 
@@ -143,18 +152,20 @@ def sample_listener_tuple(proto=None, monitor=True, persistence=True,
     proto = 'HTTP' if proto is None else proto
     port = '443' if proto is 'HTTPS' or proto is 'TERMINATED_HTTPS' else '80'
     in_listener = collections.namedtuple(
-        'listener', 'id, protocol_port, protocol, default_pool, '
-                    'connection_limit, default_tls_container_id, '
+        'listener', 'id, tenant_id, protocol_port, protocol, default_pool, '
+        'connection_limit, admin_state_up, default_tls_container_id, '
                     'sni_container_ids, default_tls_container, '
-                    'sni_containers')
+                    'sni_containers, loadbalancer_id')
     return in_listener(
         id='sample_listener_id_1',
+        tenant_id='sample_tenant_id',
         protocol_port=port,
         protocol=proto,
         default_pool=sample_pool_tuple(
             proto=proto, monitor=monitor, persistence=persistence,
             persistence_type=persistence_type),
         connection_limit=98,
+        admin_state_up=True,
         default_tls_container_id='cont_id_1' if tls else '',
         sni_container_ids=['cont_id_2', 'cont_id_3'] if sni else [],
         default_tls_container=sample_tls_container_tuple(
@@ -178,7 +189,8 @@ def sample_listener_tuple(proto=None, monitor=True, persistence=True,
                     private_key='--imakey3--\n', intermediates=[
                         '--imainter3--\n', '--imainter3too--\n'],
                     primary_cn='fakeCN2'))]
-        if sni else []
+        if sni else [],
+        loadbalancer_id='sample_loadbalancer_id_1'
     )
 
 
@@ -189,22 +201,24 @@ def sample_tls_sni_container_tuple(tls_container=None, tls_container_id=None):
 
 
 def sample_tls_container_tuple(id='cont_id_1', certificate=None,
-                               private_key=None, intermediates=[],
+                               private_key=None, intermediates=None,
                                primary_cn=None):
+    intermediates = intermediates or []
     sc = collections.namedtuple(
         'tls_cert',
         'id, certificate, private_key, intermediates, primary_cn')
     return sc(id=id, certificate=certificate, private_key=private_key,
-              intermediates=intermediates, primary_cn=primary_cn)
+              intermediates=intermediates or [], primary_cn=primary_cn)
 
 
 def sample_pool_tuple(proto=None, monitor=True, persistence=True,
-                      persistence_type=None):
+                      persistence_type=None, hm_admin_state=True):
     proto = 'HTTP' if proto is None else proto
     in_pool = collections.namedtuple(
         'pool', 'id, protocol, lb_algorithm, members, healthmonitor,'
-                'sessionpersistence, admin_state_up, provisioning_status')
-    mon = sample_health_monitor_tuple(proto=proto) if monitor is True else None
+                'session_persistence, admin_state_up, provisioning_status')
+    mon = (sample_health_monitor_tuple(proto=proto, admin_state=hm_admin_state)
+           if monitor is True else None)
     persis = sample_session_persistence_tuple(
         persistence_type=persistence_type) if persistence is True else None
     return in_pool(
@@ -214,7 +228,7 @@ def sample_pool_tuple(proto=None, monitor=True, persistence=True,
         members=[sample_member_tuple('sample_member_id_1', '10.0.0.99'),
                  sample_member_tuple('sample_member_id_2', '10.0.0.98')],
         healthmonitor=mon,
-        sessionpersistence=persis,
+        session_persistence=persis,
         admin_state_up=True,
         provisioning_status='ACTIVE')
 
@@ -242,7 +256,7 @@ def sample_session_persistence_tuple(persistence_type=None):
                         cookie_name=pt)
 
 
-def sample_health_monitor_tuple(proto='HTTP'):
+def sample_health_monitor_tuple(proto='HTTP', admin_state=True):
     proto = 'HTTP' if proto is 'TERMINATED_HTTPS' else proto
     monitor = collections.namedtuple(
         'monitor', 'id, type, delay, timeout, max_retries, http_method, '
@@ -251,10 +265,10 @@ def sample_health_monitor_tuple(proto='HTTP'):
     return monitor(id='sample_monitor_id_1', type=proto, delay=30,
                    timeout=31, max_retries=3, http_method='GET',
                    url_path='/index.html', expected_codes='500, 405, 404',
-                   admin_state_up=True)
+                   admin_state_up=admin_state)
 
 
-def sample_base_expected_config(frontend=None, backend=None):
+def sample_base_expected_config(backend, frontend=None):
     if frontend is None:
         frontend = ("frontend sample_listener_id_1\n"
                     "    option tcplog\n"
@@ -263,18 +277,6 @@ def sample_base_expected_config(frontend=None, backend=None):
                     "    bind 10.0.0.2:80\n"
                     "    mode http\n"
                     "    default_backend sample_pool_id_1\n\n")
-    if backend is None:
-        backend = ("backend sample_pool_id_1\n"
-                   "    mode http\n"
-                   "    balance roundrobin\n"
-                   "    cookie SRV insert indirect nocache\n"
-                   "    timeout check 31\n"
-                   "    option httpchk GET /index.html\n"
-                   "    http-check expect rstatus 405|404|500\n"
-                   "    server sample_member_id_1 10.0.0.99:82 weight 13 "
-                   "check inter 30s fall 3 cookie sample_member_id_1\n"
-                   "    server sample_member_id_2 10.0.0.98:82 weight 13 "
-                   "check inter 30s fall 3 cookie sample_member_id_2\n")
     return ("# Configuration for test-lb\n"
             "global\n"
             "    daemon\n"

@@ -31,7 +31,7 @@ class TestHaproxyCfg(base.BaseTestCase):
         with contextlib.nested(
             mock.patch('neutron_lbaas.services.loadbalancer.'
                        'drivers.haproxy.jinja_cfg.render_loadbalancer_obj'),
-            mock.patch('neutron.agent.linux.utils.replace_file')
+            mock.patch('neutron.common.utils.replace_file')
         ) as (r_t, replace):
             r_t.return_value = 'fake_rendered_template'
             lb = mock.Mock()
@@ -55,6 +55,7 @@ class TestHaproxyCfg(base.BaseTestCase):
 
         fe = ("frontend sample_listener_id_1\n"
               "    option tcplog\n"
+              "    redirect scheme https if !{ ssl_fc }\n"
               "    maxconn 98\n"
               "    option forwardfor\n"
               "    bind 10.0.0.2:443"
@@ -64,21 +65,20 @@ class TestHaproxyCfg(base.BaseTestCase):
               "    default_backend sample_pool_id_1\n\n")
         be = ("backend sample_pool_id_1\n"
               "    mode http\n"
-              "    redirect scheme https if !{ ssl_fc }\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
               "    timeout check 31\n"
               "    option httpchk GET /index.html\n"
-              "    http-check expect rstatus 405|404|500\n"
-              "    option forwardfor\n"
+              "    http-check expect rstatus %s\n"
               "    server sample_member_id_1 10.0.0.99:82"
               " weight 13 check inter 30s fall 3 cookie sample_member_id_1\n"
               "    server sample_member_id_2 10.0.0.98:82"
               " weight 13 check inter 30s fall 3 cookie "
-              "sample_member_id_2\n\n")
+              "sample_member_id_2\n\n"
+              % sample_configs.PIPED_CODES)
         with mock.patch('os.makedirs'):
             with mock.patch('os.listdir'):
-                with mock.patch.object(jinja_cfg, 'utils'):
+                with mock.patch.object(jinja_cfg, 'n_utils'):
                     with mock.patch.object(
                             jinja_cfg, '_process_tls_certificates') as crt:
                         crt.return_value = {
@@ -101,6 +101,7 @@ class TestHaproxyCfg(base.BaseTestCase):
 
         fe = ("frontend sample_listener_id_1\n"
               "    option tcplog\n"
+              "    redirect scheme https if !{ ssl_fc }\n"
               "    maxconn 98\n"
               "    option forwardfor\n"
               "    bind 10.0.0.2:443"
@@ -109,21 +110,20 @@ class TestHaproxyCfg(base.BaseTestCase):
               "    default_backend sample_pool_id_1\n\n")
         be = ("backend sample_pool_id_1\n"
               "    mode http\n"
-              "    redirect scheme https if !{ ssl_fc }\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
               "    timeout check 31\n"
               "    option httpchk GET /index.html\n"
-              "    http-check expect rstatus 405|404|500\n"
-              "    option forwardfor\n"
+              "    http-check expect rstatus %s\n"
               "    server sample_member_id_1 10.0.0.99:82 "
               "weight 13 check inter 30s fall 3 cookie sample_member_id_1\n"
               "    server sample_member_id_2 10.0.0.98:82 "
-              "weight 13 check inter 30s fall 3 cookie sample_member_id_2\n\n")
+              "weight 13 check inter 30s fall 3 cookie sample_member_id_2\n\n"
+              % sample_configs.PIPED_CODES)
         with mock.patch('os.makedirs'):
-            with mock.patch('neutron.agent.linux.utils.replace_file'):
+            with mock.patch('neutron.common.utils.replace_file'):
                 with mock.patch('os.listdir'):
-                    with mock.patch.object(jinja_cfg, 'utils'):
+                    with mock.patch.object(jinja_cfg, 'n_utils'):
                         with mock.patch.object(
                                 jinja_cfg, '_process_tls_certificates') as crt:
                             crt.return_value = {
@@ -146,12 +146,12 @@ class TestHaproxyCfg(base.BaseTestCase):
               "    cookie SRV insert indirect nocache\n"
               "    timeout check 31\n"
               "    option httpchk GET /index.html\n"
-              "    http-check expect rstatus 405|404|500\n"
-              "    option forwardfor\n"
+              "    http-check expect rstatus %s\n"
               "    server sample_member_id_1 10.0.0.99:82 "
               "weight 13 check inter 30s fall 3 cookie sample_member_id_1\n"
               "    server sample_member_id_2 10.0.0.98:82 "
-              "weight 13 check inter 30s fall 3 cookie sample_member_id_2\n\n")
+              "weight 13 check inter 30s fall 3 cookie sample_member_id_2\n\n"
+              % sample_configs.PIPED_CODES)
         rendered_obj = jinja_cfg.render_loadbalancer_obj(
             sample_configs.sample_loadbalancer_tuple(),
             'nogroup', '/sock_path', '/v2')
@@ -172,12 +172,13 @@ class TestHaproxyCfg(base.BaseTestCase):
               "    cookie SRV insert indirect nocache\n"
               "    timeout check 31\n"
               "    option httpchk GET /index.html\n"
-              "    http-check expect rstatus 405|404|500\n"
+              "    http-check expect rstatus %s\n"
               "    option ssl-hello-chk\n"
               "    server sample_member_id_1 10.0.0.99:82 "
               "weight 13 check inter 30s fall 3 cookie sample_member_id_1\n"
               "    server sample_member_id_2 10.0.0.98:82 "
-              "weight 13 check inter 30s fall 3 cookie sample_member_id_2\n\n")
+              "weight 13 check inter 30s fall 3 cookie sample_member_id_2\n\n"
+              % sample_configs.PIPED_CODES)
         rendered_obj = jinja_cfg.render_loadbalancer_obj(
             sample_configs.sample_loadbalancer_tuple(proto='HTTPS'),
             'nogroup', '/sock_path', '/v2')
@@ -189,7 +190,6 @@ class TestHaproxyCfg(base.BaseTestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
-              "    option forwardfor\n"
               "    server sample_member_id_1 10.0.0.99:82 weight 13 "
               "cookie sample_member_id_1\n"
               "    server sample_member_id_2 10.0.0.98:82 weight 13 "
@@ -246,7 +246,6 @@ class TestHaproxyCfg(base.BaseTestCase):
         be = ("backend sample_pool_id_1\n"
               "    mode http\n"
               "    balance roundrobin\n"
-              "    option forwardfor\n"
               "    server sample_member_id_1 10.0.0.99:82 weight 13\n"
               "    server sample_member_id_2 10.0.0.98:82 weight 13\n\n")
         rendered_obj = jinja_cfg.render_loadbalancer_obj(
@@ -264,12 +263,12 @@ class TestHaproxyCfg(base.BaseTestCase):
               "    stick on src\n"
               "    timeout check 31\n"
               "    option httpchk GET /index.html\n"
-              "    http-check expect rstatus 405|404|500\n"
-              "    option forwardfor\n"
+              "    http-check expect rstatus %s\n"
               "    server sample_member_id_1 10.0.0.99:82 "
               "weight 13 check inter 30s fall 3\n"
               "    server sample_member_id_2 10.0.0.98:82 "
-              "weight 13 check inter 30s fall 3\n\n")
+              "weight 13 check inter 30s fall 3\n\n"
+              % sample_configs.PIPED_CODES)
         rendered_obj = jinja_cfg.render_loadbalancer_obj(
             sample_configs.sample_loadbalancer_tuple(
                 persistence_type='SOURCE_IP'),
@@ -280,7 +279,7 @@ class TestHaproxyCfg(base.BaseTestCase):
 
     def test_render_template_appsession_persistence(self):
         with mock.patch('os.makedirs') as md:
-            with mock.patch.object(jinja_cfg, 'utils'):
+            with mock.patch.object(jinja_cfg, 'n_utils'):
                 md.return_value = '/data/dirs/'
                 be = ("backend sample_pool_id_1\n"
                       "    mode http\n"
@@ -288,12 +287,12 @@ class TestHaproxyCfg(base.BaseTestCase):
                       "    appsession APP_COOKIE len 56 timeout 3h\n"
                       "    timeout check 31\n"
                       "    option httpchk GET /index.html\n"
-                      "    http-check expect rstatus 405|404|500\n"
-                      "    option forwardfor\n"
+                      "    http-check expect rstatus %s\n"
                       "    server sample_member_id_1 10.0.0.99:82 "
                       "weight 13 check inter 30s fall 3\n"
                       "    server sample_member_id_2 10.0.0.98:82 "
-                      "weight 13 check inter 30s fall 3\n\n")
+                      "weight 13 check inter 30s fall 3\n\n"
+                      % sample_configs.PIPED_CODES)
                 rendered_obj = jinja_cfg.render_loadbalancer_obj(
                     sample_configs.sample_loadbalancer_tuple(
                         persistence_type='APP_COOKIE'),
@@ -318,7 +317,7 @@ class TestHaproxyCfg(base.BaseTestCase):
     def test_store_listener_crt(self):
         l = sample_configs.sample_listener_tuple(tls=True, sni=True)
         with mock.patch('os.makedirs'):
-            with mock.patch('neutron.agent.linux.utils.replace_file'):
+            with mock.patch('neutron.common.utils.replace_file'):
                     ret = jinja_cfg._store_listener_crt(
                         '/v2/loadbalancers', l, l.default_tls_container)
                     self.assertEqual(
@@ -433,6 +432,13 @@ class TestHaproxyCfg(base.BaseTestCase):
         ret = jinja_cfg._transform_pool(in_pool)
         self.assertEqual(sample_configs.RET_POOL, ret)
 
+    def test_transform_pool_admin_state_down(self):
+        in_pool = sample_configs.sample_pool_tuple(hm_admin_state=False)
+        ret = jinja_cfg._transform_pool(in_pool)
+        result = sample_configs.RET_POOL
+        result['health_monitor'] = ''
+        self.assertEqual(result, ret)
+
     def test_transform_listener(self):
         in_listener = sample_configs.sample_listener_tuple()
         ret = jinja_cfg._transform_listener(in_listener, '/v2')
@@ -464,28 +470,28 @@ class TestHaproxyCfg(base.BaseTestCase):
 
     def test_expand_expected_codes(self):
         exp_codes = ''
-        self.assertEqual(jinja_cfg._expand_expected_codes(exp_codes), set([]))
+        self.assertEqual(set([]), jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '200'
-        self.assertEqual(
-            jinja_cfg._expand_expected_codes(exp_codes), set(['200']))
+        self.assertEqual(set(['200']),
+                         jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '200, 201'
-        self.assertEqual(jinja_cfg._expand_expected_codes(exp_codes),
-                         set(['200', '201']))
+        self.assertEqual(set(['200', '201']),
+                         jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '200, 201,202'
-        self.assertEqual(jinja_cfg._expand_expected_codes(exp_codes),
-                         set(['200', '201', '202']))
+        self.assertEqual(set(['200', '201', '202']),
+                         jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '200-202'
-        self.assertEqual(jinja_cfg._expand_expected_codes(exp_codes),
-                         set(['200', '201', '202']))
+        self.assertEqual(set(['200', '201', '202']),
+                         jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '200-202, 205'
-        self.assertEqual(jinja_cfg._expand_expected_codes(exp_codes),
-                         set(['200', '201', '202', '205']))
+        self.assertEqual(set(['200', '201', '202', '205']),
+                         jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '200, 201-203'
-        self.assertEqual(jinja_cfg._expand_expected_codes(exp_codes),
-                         set(['200', '201', '202', '203']))
+        self.assertEqual(set(['200', '201', '202', '203']),
+                         jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '200, 201-203, 205'
-        self.assertEqual(jinja_cfg._expand_expected_codes(exp_codes),
-                         set(['200', '201', '202', '203', '205']))
+        self.assertEqual(set(['200', '201', '202', '203', '205']),
+                         jinja_cfg._expand_expected_codes(exp_codes))
         exp_codes = '201-200, 205'
-        self.assertEqual(
-            jinja_cfg._expand_expected_codes(exp_codes), set(['205']))
+        self.assertEqual(set(['205']),
+                         jinja_cfg._expand_expected_codes(exp_codes))

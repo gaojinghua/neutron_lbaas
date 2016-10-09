@@ -17,13 +17,14 @@ import copy
 
 import mock
 from neutron.api.v2 import attributes as attr
-from neutron.openstack.common import uuidutils
 from neutron.plugins.common import constants
 from neutron.tests.unit.api.v2 import test_base
+from oslo_utils import uuidutils
 from webob import exc
 
 from neutron_lbaas.extensions import loadbalancer
 from neutron_lbaas.extensions import loadbalancerv2
+from neutron_lbaas.extensions import sharedpools
 from neutron_lbaas.tests import base
 
 
@@ -64,10 +65,28 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
                             content_type='application/%s' % self.fmt)
         instance.create_vip.assert_called_with(mock.ANY,
                                                vip=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('vip', res)
-        self.assertEqual(res['vip'], return_value)
+        self.assertEqual(return_value, res['vip'])
+
+    def test_vip_create_with_connection_limit_smaller_than_min_value(self):
+        data = {'vip': {'name': 'vip1',
+                        'description': 'descr_vip1',
+                        'subnet_id': _uuid(),
+                        'address': '127.0.0.1',
+                        'protocol_port': 80,
+                        'protocol': 'HTTP',
+                        'pool_id': _uuid(),
+                        'session_persistence': {'type': 'HTTP_COOKIE'},
+                        'connection_limit': -4,
+                        'admin_state_up': True,
+                        'tenant_id': _uuid()}}
+        res = self.api.post(_get_path('lb/vips', fmt=self.fmt),
+                            self.serialize(data),
+                            content_type='application/%s' % self.fmt,
+                            expect_errors=True)
+        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
 
     def test_vip_list(self):
         vip_id = _uuid()
@@ -83,7 +102,7 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_vips.assert_called_with(mock.ANY, fields=mock.ANY,
                                              filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_vip_update(self):
         vip_id = _uuid()
@@ -102,10 +121,19 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.update_vip.assert_called_with(mock.ANY, vip_id,
                                                vip=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('vip', res)
-        self.assertEqual(res['vip'], return_value)
+        self.assertEqual(return_value, res['vip'])
+
+    def test_vip_update_with_connection_limit_smaller_than_min_value(self):
+        vip_id = _uuid()
+        data = {'vip': {'connection_limit': -4}}
+        res = self.api.put(_get_path('lb/vips', id=vip_id, fmt=self.fmt),
+                           self.serialize(data),
+                           content_type='application/%s' % self.fmt,
+                           expect_errors=True)
+        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
 
     def test_vip_get(self):
         vip_id = _uuid()
@@ -122,10 +150,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_vip.assert_called_with(mock.ANY, vip_id,
                                             fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('vip', res)
-        self.assertEqual(res['vip'], return_value)
+        self.assertEqual(return_value, res['vip'])
 
     def test_vip_delete(self):
         self._test_entity_delete('vip')
@@ -153,10 +181,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
         data['pool']['provider'] = attr.ATTR_NOT_SPECIFIED
         instance.create_pool.assert_called_with(mock.ANY,
                                                 pool=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('pool', res)
-        self.assertEqual(res['pool'], return_value)
+        self.assertEqual(return_value, res['pool'])
 
     def test_pool_list(self):
         pool_id = _uuid()
@@ -172,7 +200,7 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_pools.assert_called_with(mock.ANY, fields=mock.ANY,
                                               filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_pool_update(self):
         pool_id = _uuid()
@@ -191,10 +219,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.update_pool.assert_called_with(mock.ANY, pool_id,
                                                 pool=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('pool', res)
-        self.assertEqual(res['pool'], return_value)
+        self.assertEqual(return_value, res['pool'])
 
     def test_pool_get(self):
         pool_id = _uuid()
@@ -211,10 +239,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_pool.assert_called_with(mock.ANY, pool_id,
                                              fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('pool', res)
-        self.assertEqual(res['pool'], return_value)
+        self.assertEqual(return_value, res['pool'])
 
     def test_pool_delete(self):
         self._test_entity_delete('pool')
@@ -231,10 +259,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
         res = self.api.get(path)
 
         instance.stats.assert_called_with(mock.ANY, pool_id)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('stats', res)
-        self.assertEqual(res['stats'], stats['stats'])
+        self.assertEqual(stats['stats'], res['stats'])
 
     def test_member_create(self):
         member_id = _uuid()
@@ -254,10 +282,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
                             content_type='application/%s' % self.fmt)
         instance.create_member.assert_called_with(mock.ANY,
                                                   member=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('member', res)
-        self.assertEqual(res['member'], return_value)
+        self.assertEqual(return_value, res['member'])
 
     def test_member_list(self):
         member_id = _uuid()
@@ -273,7 +301,7 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_members.assert_called_with(mock.ANY, fields=mock.ANY,
                                                 filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_member_update(self):
         member_id = _uuid()
@@ -292,10 +320,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.update_member.assert_called_with(mock.ANY, member_id,
                                                   member=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('member', res)
-        self.assertEqual(res['member'], return_value)
+        self.assertEqual(return_value, res['member'])
 
     def test_member_get(self):
         member_id = _uuid()
@@ -312,10 +340,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_member.assert_called_with(mock.ANY, member_id,
                                                fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('member', res)
-        self.assertEqual(res['member'], return_value)
+        self.assertEqual(return_value, res['member'])
 
     def test_member_delete(self):
         self._test_entity_delete('member')
@@ -342,10 +370,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
                             content_type='application/%s' % self.fmt)
         instance.create_health_monitor.assert_called_with(mock.ANY,
                                                           health_monitor=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('health_monitor', res)
-        self.assertEqual(res['health_monitor'], return_value)
+        self.assertEqual(return_value, res['health_monitor'])
 
     def test_health_monitor_create_with_timeout_negative(self):
         data = {'health_monitor': {'type': 'HTTP',
@@ -378,7 +406,7 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_health_monitors.assert_called_with(
             mock.ANY, fields=mock.ANY, filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_health_monitor_update(self):
         health_monitor_id = _uuid()
@@ -399,10 +427,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.update_health_monitor.assert_called_with(
             mock.ANY, health_monitor_id, health_monitor=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('health_monitor', res)
-        self.assertEqual(res['health_monitor'], return_value)
+        self.assertEqual(return_value, res['health_monitor'])
 
     def test_health_monitor_get(self):
         health_monitor_id = _uuid()
@@ -421,10 +449,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
 
         instance.get_health_monitor.assert_called_with(
             mock.ANY, health_monitor_id, fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('health_monitor', res)
-        self.assertEqual(res['health_monitor'], return_value)
+        self.assertEqual(return_value, res['health_monitor'])
 
     def test_health_monitor_delete(self):
         self._test_entity_delete('health_monitor')
@@ -442,10 +470,10 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
                             content_type='application/%s' % self.fmt)
         instance.create_pool_health_monitor.assert_called_with(
             mock.ANY, pool_id='id1', health_monitor=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('health_monitor', res)
-        self.assertEqual(res['health_monitor'], return_value)
+        self.assertEqual(return_value, res['health_monitor'])
 
     def test_delete_pool_health_monitor(self):
         health_monitor_id = _uuid()
@@ -456,7 +484,7 @@ class LoadBalancerExtensionTestCase(base.ExtensionTestCase):
         instance = self.plugin.return_value
         instance.delete_pool_health_monitor.assert_called_with(
             mock.ANY, health_monitor_id, pool_id='id1')
-        self.assertEqual(res.status_int, exc.HTTPNoContent.code)
+        self.assertEqual(exc.HTTPNoContent.code, res.status_int)
 
 
 class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
@@ -464,9 +492,12 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
     def setUp(self):
         super(LoadBalancerExtensionV2TestCase, self).setUp()
+        resource_map = loadbalancerv2.RESOURCE_ATTRIBUTE_MAP.copy()
+        for k in sharedpools.EXTENDED_ATTRIBUTES_2_0.keys():
+            resource_map[k].update(sharedpools.EXTENDED_ATTRIBUTES_2_0[k])
         self._setUpExtension(
             'neutron_lbaas.extensions.loadbalancerv2.LoadBalancerPluginBaseV2',
-            constants.LOADBALANCERV2, loadbalancerv2.RESOURCE_ATTRIBUTE_MAP,
+            constants.LOADBALANCERV2, resource_map,
             loadbalancerv2.Loadbalancerv2, 'lbaas', use_quota=True)
 
     def test_loadbalancer_create(self):
@@ -486,14 +517,43 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         res = self.api.post(_get_path('lbaas/loadbalancers', fmt=self.fmt),
                             self.serialize(data),
                             content_type='application/{0}'.format(self.fmt))
-        data['loadbalancer'].update({'provider': attr.ATTR_NOT_SPECIFIED})
+        data['loadbalancer'].update({'provider': attr.ATTR_NOT_SPECIFIED,
+                                     'flavor_id': attr.ATTR_NOT_SPECIFIED})
         instance.create_loadbalancer.assert_called_with(mock.ANY,
                                                         loadbalancer=data)
 
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('loadbalancer', res)
-        self.assertEqual(res['loadbalancer'], return_value)
+        self.assertEqual(return_value, res['loadbalancer'])
+
+    def test_loadbalancer_create_invalid_flavor(self):
+        data = {'loadbalancer': {'name': 'lb1',
+                                 'description': 'descr_lb1',
+                                 'tenant_id': _uuid(),
+                                 'vip_subnet_id': _uuid(),
+                                 'admin_state_up': True,
+                                 'flavor_id': 123,
+                                 'vip_address': '127.0.0.1'}}
+        res = self.api.post(_get_path('lbaas/loadbalancers', fmt=self.fmt),
+                            self.serialize(data),
+                            content_type='application/{0}'.format(self.fmt),
+                            expect_errors=True)
+        self.assertEqual(400, res.status_int)
+
+    def test_loadbalancer_create_valid_flavor(self):
+        data = {'loadbalancer': {'name': 'lb1',
+                                 'description': 'descr_lb1',
+                                 'tenant_id': _uuid(),
+                                 'vip_subnet_id': _uuid(),
+                                 'admin_state_up': True,
+                                 'flavor_id': _uuid(),
+                                 'vip_address': '127.0.0.1'}}
+        res = self.api.post(_get_path('lbaas/loadbalancers', fmt=self.fmt),
+                            self.serialize(data),
+                            content_type='application/{0}'.format(self.fmt),
+                            expect_errors=True)
+        self.assertEqual(201, res.status_int)
 
     def test_loadbalancer_list(self):
         lb_id = _uuid()
@@ -510,7 +570,7 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         instance.get_loadbalancers.assert_called_with(mock.ANY,
                                                       fields=mock.ANY,
                                                       filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_loadbalancer_update(self):
         lb_id = _uuid()
@@ -530,10 +590,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.update_loadbalancer.assert_called_with(
             mock.ANY, lb_id, loadbalancer=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('loadbalancer', res)
-        self.assertEqual(res['loadbalancer'], return_value)
+        self.assertEqual(return_value, res['loadbalancer'])
 
     def test_loadbalancer_get(self):
         lb_id = _uuid()
@@ -551,10 +611,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.get_loadbalancer.assert_called_with(mock.ANY, lb_id,
                                                      fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('loadbalancer', res)
-        self.assertEqual(res['loadbalancer'], return_value)
+        self.assertEqual(return_value, res['loadbalancer'])
 
     def test_loadbalancer_delete(self):
         self._test_entity_delete('loadbalancer')
@@ -566,8 +626,43 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                              'description': 'listen-1-desc',
                              'protocol': 'HTTP',
                              'protocol_port': 80,
-                             'default_tls_container_id': None,
-                             'sni_container_ids': [],
+                             'default_pool_id': None,
+                             'default_tls_container_ref': None,
+                             'sni_container_refs': [],
+                             'connection_limit': 100,
+                             'admin_state_up': True,
+                             'loadbalancer_id': _uuid()}}
+        return_value = copy.copy(data['listener'])
+        return_value.update({'id': listener_id})
+        del return_value['loadbalancer_id']
+
+        instance = self.plugin.return_value
+        instance.create_listener.return_value = return_value
+
+        res = self.api.post(_get_path('lbaas/listeners', fmt=self.fmt),
+                            self.serialize(data),
+                            content_type='application/{0}'.format(self.fmt))
+        instance.create_listener.assert_called_with(mock.ANY,
+                                                    listener=data)
+
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        res = self.deserialize(res)
+        self.assertIn('listener', res)
+        self.assertEqual(return_value, res['listener'])
+
+    def test_listener_create_with_tls(self):
+        listener_id = _uuid()
+        tls_ref = 'http://example.ref/uuid'
+        sni_refs = ['http://example.ref/uuid',
+                    'http://example.ref/uuid1']
+        data = {'listener': {'tenant_id': _uuid(),
+                             'name': 'listen-name-1',
+                             'description': 'listen-1-desc',
+                             'protocol': 'HTTP',
+                             'protocol_port': 80,
+                             'default_pool_id': None,
+                             'default_tls_container_ref': tls_ref,
+                             'sni_container_refs': sni_refs,
                              'connection_limit': 100,
                              'admin_state_up': True,
                              'loadbalancer_id': _uuid()}}
@@ -589,6 +684,24 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         self.assertIn('listener', res)
         self.assertEqual(res['listener'], return_value)
 
+    def test_listener_create_with_connection_limit_less_than_min_value(self):
+        data = {'listener': {'tenant_id': _uuid(),
+                             'name': 'listen-name-1',
+                             'description': 'listen-1-desc',
+                             'protocol': 'HTTP',
+                             'protocol_port': 80,
+                             'default_tls_container_ref': None,
+                             'sni_container_refs': [],
+                             'connection_limit': -4,
+                             'admin_state_up': True,
+                             'loadbalancer_id': _uuid()}}
+
+        res = self.api.post(_get_path('lbaas/listeners', fmt=self.fmt),
+                            self.serialize(data),
+                            content_type='application/{0}'.format(self.fmt),
+                            expect_errors=True)
+        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+
     def test_listener_list(self):
         listener_id = _uuid()
         return_value = [{'admin_state_up': True,
@@ -603,7 +716,7 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         instance.get_listeners.assert_called_with(mock.ANY,
                                                   fields=mock.ANY,
                                                   filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_listener_update(self):
         listener_id = _uuid()
@@ -623,10 +736,48 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.update_listener.assert_called_with(
             mock.ANY, listener_id, listener=update_data)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
+        res = self.deserialize(res)
+        self.assertIn('listener', res)
+        self.assertEqual(return_value, res['listener'])
+
+    def test_listener_update_with_tls(self):
+        listener_id = _uuid()
+        tls_ref = 'http://example.ref/uuid'
+        sni_refs = ['http://example.ref/uuid',
+                    'http://example.ref/uuid1']
+        update_data = {'listener': {'admin_state_up': False}}
+        return_value = {'name': 'listener1',
+                        'admin_state_up': False,
+                        'tenant_id': _uuid(),
+                        'id': listener_id,
+                        'default_tls_container_ref': tls_ref,
+                        'sni_container_refs': sni_refs}
+
+        instance = self.plugin.return_value
+        instance.update_listener.return_value = return_value
+
+        res = self.api.put(_get_path('lbaas/listeners',
+                                     id=listener_id,
+                                     fmt=self.fmt),
+                           self.serialize(update_data))
+
+        instance.update_listener.assert_called_with(
+            mock.ANY, listener_id, listener=update_data)
         self.assertEqual(res.status_int, exc.HTTPOk.code)
         res = self.deserialize(res)
         self.assertIn('listener', res)
         self.assertEqual(res['listener'], return_value)
+
+    def test_listener_update_with_connection_limit_less_than_min_value(self):
+        listener_id = _uuid()
+        update_data = {'listener': {'connection_limit': -4}}
+        res = self.api.put(_get_path('lbaas/listeners',
+                                     id=listener_id,
+                                     fmt=self.fmt),
+                           self.serialize(update_data),
+                           expect_errors=True)
+        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
 
     def test_listener_get(self):
         listener_id = _uuid()
@@ -644,10 +795,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.get_listener.assert_called_with(mock.ANY, listener_id,
                                                  fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('listener', res)
-        self.assertEqual(res['listener'], return_value)
+        self.assertEqual(return_value, res['listener'])
 
     def test_listener_delete(self):
         self._test_entity_delete('listener')
@@ -659,12 +810,13 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                          'protocol': 'HTTP',
                          'lb_algorithm': 'ROUND_ROBIN',
                          'admin_state_up': True,
+                         'loadbalancer_id': _uuid(),
+                         'listener_id': None,
                          'tenant_id': _uuid(),
-                         'listener_id': _uuid(),
                          'session_persistence': {}}}
         return_value = copy.copy(data['pool'])
         return_value.update({'id': pool_id})
-        del return_value['listener_id']
+        return_value.pop('listener_id')
 
         instance = self.plugin.return_value
         instance.create_pool.return_value = return_value
@@ -672,10 +824,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                             self.serialize(data),
                             content_type='application/%s' % self.fmt)
         instance.create_pool.assert_called_with(mock.ANY, pool=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('pool', res)
-        self.assertEqual(res['pool'], return_value)
+        self.assertEqual(return_value, res['pool'])
 
     def test_pool_list(self):
         pool_id = _uuid()
@@ -691,7 +843,7 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.get_pools.assert_called_with(mock.ANY, fields=mock.ANY,
                                               filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_pool_update(self):
         pool_id = _uuid()
@@ -710,10 +862,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.update_pool.assert_called_with(mock.ANY, pool_id,
                                                 pool=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('pool', res)
-        self.assertEqual(res['pool'], return_value)
+        self.assertEqual(return_value, res['pool'])
 
     def test_pool_get(self):
         pool_id = _uuid()
@@ -730,10 +882,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.get_pool.assert_called_with(mock.ANY, pool_id,
                                              fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('pool', res)
-        self.assertEqual(res['pool'], return_value)
+        self.assertEqual(return_value, res['pool'])
 
     def test_pool_delete(self):
         self._test_entity_delete('pool')
@@ -746,7 +898,8 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                            'weight': 1,
                            'subnet_id': subnet_id,
                            'admin_state_up': True,
-                           'tenant_id': _uuid()}}
+                           'tenant_id': _uuid(),
+                           'name': 'member1'}}
         return_value = copy.copy(data['member'])
         return_value.update({'id': member_id})
 
@@ -760,17 +913,18 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         instance.create_pool_member.assert_called_with(mock.ANY,
                                                        pool_id='pid1',
                                                        member=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('member', res)
-        self.assertEqual(res['member'], return_value)
+        self.assertEqual(return_value, res['member'])
 
     def test_pool_member_list(self):
         member_id = _uuid()
         return_value = [{'name': 'member1',
                          'admin_state_up': True,
                          'tenant_id': _uuid(),
-                         'id': member_id}]
+                         'id': member_id,
+                         'name': 'member1'}]
 
         instance = self.plugin.return_value
         instance.get_pools.return_value = return_value
@@ -782,14 +936,15 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                                                      fields=mock.ANY,
                                                      filters=mock.ANY,
                                                      pool_id='pid1')
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_pool_member_update(self):
         member_id = _uuid()
         update_data = {'member': {'admin_state_up': False}}
         return_value = {'admin_state_up': False,
                         'tenant_id': _uuid(),
-                        'id': member_id}
+                        'id': member_id,
+                        'name': 'member1'}
 
         instance = self.plugin.return_value
         instance.update_pool_member.return_value = return_value
@@ -802,16 +957,17 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         instance.update_pool_member.assert_called_with(
             mock.ANY, member_id, pool_id='pid1',
             member=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('member', res)
-        self.assertEqual(res['member'], return_value)
+        self.assertEqual(return_value, res['member'])
 
     def test_pool_member_get(self):
         member_id = _uuid()
         return_value = {'admin_state_up': False,
                         'tenant_id': _uuid(),
-                        'id': member_id}
+                        'id': member_id,
+                        'name': 'member1'}
 
         instance = self.plugin.return_value
         instance.get_pool_member.return_value = return_value
@@ -823,10 +979,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                                                     member_id,
                                                     fields=mock.ANY,
                                                     pool_id='pid1')
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('member', res)
-        self.assertEqual(res['member'], return_value)
+        self.assertEqual(return_value, res['member'])
 
     def test_pool_member_delete(self):
         entity_id = _uuid()
@@ -837,7 +993,7 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                                 "delete_pool_member")
         delete_entity.assert_called_with(mock.ANY, entity_id,
                                          pool_id='pid1')
-        self.assertEqual(res.status_int, exc.HTTPNoContent.code)
+        self.assertEqual(exc.HTTPNoContent.code, res.status_int)
 
     def test_health_monitor_create(self):
         health_monitor_id = _uuid()
@@ -850,7 +1006,8 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                                   'expected_codes': '200-300',
                                   'admin_state_up': True,
                                   'tenant_id': _uuid(),
-                                  'pool_id': _uuid()}}
+                                  'pool_id': _uuid(),
+                                  'name': 'monitor1'}}
         return_value = copy.copy(data['healthmonitor'])
         return_value.update({'id': health_monitor_id})
         del return_value['pool_id']
@@ -863,10 +1020,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                             content_type='application/%s' % self.fmt)
         instance.create_healthmonitor.assert_called_with(
             mock.ANY, healthmonitor=data)
-        self.assertEqual(res.status_int, exc.HTTPCreated.code)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('healthmonitor', res)
-        self.assertEqual(res['healthmonitor'], return_value)
+        self.assertEqual(return_value, res['healthmonitor'])
 
     def test_health_monitor_create_with_timeout_negative(self):
         data = {'healthmonitor': {'type': 'HTTP',
@@ -878,7 +1035,8 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                                   'expected_codes': '200-300',
                                   'admin_state_up': True,
                                   'tenant_id': _uuid(),
-                                  'pool_id': _uuid()}}
+                                  'pool_id': _uuid(),
+                                  'name': 'monitor1'}}
         res = self.api.post(_get_path('lbaas/healthmonitors',
                                       fmt=self.fmt),
                             self.serialize(data),
@@ -891,7 +1049,8 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         return_value = [{'type': 'HTTP',
                          'admin_state_up': True,
                          'tenant_id': _uuid(),
-                         'id': health_monitor_id}]
+                         'id': health_monitor_id,
+                         'name': 'monitor1'}]
 
         instance = self.plugin.return_value
         instance.get_healthmonitors.return_value = return_value
@@ -900,7 +1059,7 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.get_healthmonitors.assert_called_with(
             mock.ANY, fields=mock.ANY, filters=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
 
     def test_health_monitor_update(self):
         health_monitor_id = _uuid()
@@ -908,7 +1067,8 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         return_value = {'type': 'HTTP',
                         'admin_state_up': False,
                         'tenant_id': _uuid(),
-                        'id': health_monitor_id}
+                        'id': health_monitor_id,
+                        'name': 'monitor1'}
 
         instance = self.plugin.return_value
         instance.update_healthmonitor.return_value = return_value
@@ -920,17 +1080,18 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.update_healthmonitor.assert_called_with(
             mock.ANY, health_monitor_id, healthmonitor=update_data)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('healthmonitor', res)
-        self.assertEqual(res['healthmonitor'], return_value)
+        self.assertEqual(return_value, res['healthmonitor'])
 
     def test_health_monitor_get(self):
         health_monitor_id = _uuid()
         return_value = {'type': 'HTTP',
                         'admin_state_up': False,
                         'tenant_id': _uuid(),
-                        'id': health_monitor_id}
+                        'id': health_monitor_id,
+                        'name': 'monitor1'}
 
         instance = self.plugin.return_value
         instance.get_healthmonitor.return_value = return_value
@@ -941,10 +1102,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
 
         instance.get_healthmonitor.assert_called_with(
             mock.ANY, health_monitor_id, fields=mock.ANY)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('healthmonitor', res)
-        self.assertEqual(res['healthmonitor'], return_value)
+        self.assertEqual(return_value, res['healthmonitor'])
 
     def test_health_monitor_delete(self):
         entity_id = _uuid()
@@ -954,7 +1115,7 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         delete_entity = getattr(self.plugin.return_value,
                                 "delete_healthmonitor")
         delete_entity.assert_called_with(mock.ANY, entity_id)
-        self.assertEqual(res.status_int, exc.HTTPNoContent.code)
+        self.assertEqual(exc.HTTPNoContent.code, res.status_int)
 
     def test_load_balancer_stats(self):
         load_balancer_id = _uuid()
@@ -968,10 +1129,10 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
         res = self.api.get(path)
 
         instance.stats.assert_called_with(mock.ANY, load_balancer_id)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('stats', res)
-        self.assertEqual(res['stats'], stats['stats'])
+        self.assertEqual(stats['stats'], res['stats'])
 
     def test_load_balancer_statuses(self):
         load_balancer_id = _uuid()
@@ -983,7 +1144,7 @@ class LoadBalancerExtensionV2TestCase(base.ExtensionTestCase):
                          action="statuses", fmt=self.fmt)
         res = self.api.get(path)
         instance.statuses.assert_called_with(mock.ANY, load_balancer_id)
-        self.assertEqual(res.status_int, exc.HTTPOk.code)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
         res = self.deserialize(res)
         self.assertIn('statuses', res)
-        self.assertEqual(res['statuses'], statuses['statuses'])
+        self.assertEqual(statuses['statuses'], res['statuses'])

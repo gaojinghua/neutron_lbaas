@@ -1,5 +1,5 @@
 
-# Copyright 2014 Citrix Systems, Inc.
+# Copyright 2015 Citrix Systems, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -20,10 +20,10 @@ from oslo_log import log as logging
 
 
 from neutron import context as ncontext
-from neutron.i18n import _LE
-from neutron.openstack.common import service
 from neutron.plugins.common import constants
+from oslo_service import service
 
+from neutron_lbaas._i18n import _, _LE
 from neutron_lbaas.drivers import driver_base
 from neutron_lbaas.drivers.driver_mixins import BaseManagerMixin
 from neutron_lbaas.services.loadbalancer.drivers.netscaler import ncc_client
@@ -34,6 +34,7 @@ DEFAULT_PAGE_SIZE = "300"
 DEFAULT_IS_SYNCRONOUS = "True"
 
 PROV = "provisioning_status"
+NETSCALER = "netscaler"
 
 LOG = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ NETSCALER_CC_OPTS = [
     ),
     cfg.StrOpt(
         'netscaler_ncc_password',
+        secret=True,
         help=_('Password to login to the NetScaler Control Center Server.'),
     ),
     cfg.StrOpt(
@@ -61,6 +63,12 @@ NETSCALER_CC_OPTS = [
         default=DEFAULT_IS_SYNCRONOUS,
         help=_('Setting for option to enable synchronous operations'
                'NetScaler Control Center Server.'),
+    ),
+    cfg.StrOpt(
+        'netscaler_ncc_cleanup_mode',
+        help=_(
+            'Setting to enable/disable cleanup mode for NetScaler Control '
+            'Center Server'),
     ),
     cfg.StrOpt(
         'netscaler_status_collection',
@@ -114,9 +122,11 @@ class NetScalerLoadBalancerDriverV2(driver_base.LoadBalancerBaseDriver):
         ncc_uri = self.driver_conf.netscaler_ncc_uri
         ncc_username = self.driver_conf.netscaler_ncc_username
         ncc_password = self.driver_conf.netscaler_ncc_password
+        ncc_cleanup_mode = cfg.CONF.netscaler_driver.netscaler_ncc_cleanup_mode
         self.client = ncc_client.NSClient(ncc_uri,
                                           ncc_username,
-                                          ncc_password)
+                                          ncc_password,
+                                          ncc_cleanup_mode)
 
     def _init_managers(self):
         self.load_balancer = NetScalerLoadBalancerManager(self)
@@ -135,7 +145,21 @@ class NetScalerLoadBalancerDriverV2(driver_base.LoadBalancerBaseDriver):
         if is_status_collection.lower() == "false":
             self.is_status_collection = False
         self.pagesize_status_collection = pagesize_status_collection
+
+        self._init_pending_status_tracker()
+
         NetScalerStatusService(self).start()
+
+    def _init_pending_status_tracker(self):
+        # Initialize PROVISIONING_STATUS_TRACKER for loadbalancers in
+        # pending state
+        db_lbs = self.plugin.db.get_loadbalancers(
+            self.admin_ctx)
+        for db_lb in db_lbs:
+            if ((db_lb.id not in PROVISIONING_STATUS_TRACKER) and
+                (db_lb.provider.provider_name == NETSCALER) and
+                    (db_lb.provisioning_status.startswith("PENDING_"))):
+                PROVISIONING_STATUS_TRACKER.append(db_lb.id)
 
     def collect_provision_status(self):
 
@@ -312,7 +336,12 @@ class NetScalerCommonManager(BaseManagerMixin):
         super(NetScalerCommonManager, self).__init__(driver)
         self.payload_preparer = PayloadPreparer()
         self.client = self.driver.client
+
         self.is_synchronous = self.driver.driver_conf.is_synchronous
+        if self.is_synchronous.lower() == "false":
+            self.is_synchronous = False
+        else:
+            self.is_synchronous = True
 
     def create(self, context, obj):
         LOG.debug("%s, create %s", self.__class__.__name__, obj.id)
@@ -652,10 +681,10 @@ class PayloadPreparer(object):
             'lb_algorithm': pool.lb_algorithm,
             'admin_state_up': pool.admin_state_up
         }
-        if pool.sessionpersistence:
-            peristence = pool.sessionpersistence
+        if pool.session_persistence:
+            peristence = pool.session_persistence
             peristence_payload = self.prepare_sessionpersistence(peristence)
-            update_attrs['sessionpersistence'] = peristence_payload
+            update_attrs['session_persistence'] = peristence_payload
         return update_attrs
 
     def prepare_sessionpersistence(self, persistence):

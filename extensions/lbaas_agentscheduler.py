@@ -18,13 +18,14 @@ import abc
 from neutron.api import extensions
 from neutron.api.v2 import base
 from neutron.api.v2 import resource
-from neutron.common import constants
 from neutron.extensions import agent
 from neutron import manager
 from neutron.plugins.common import constants as plugin_const
 from neutron import policy
 from neutron import wsgi
+from neutron_lib import constants
 
+from neutron_lbaas._i18n import _
 from neutron_lbaas.extensions import loadbalancer
 
 LOADBALANCER_POOL = 'loadbalancer-pool'
@@ -105,8 +106,7 @@ class Lbaas_agentscheduler(extensions.ExtensionDescriptor):
                                        base.FAULT_MAP)
         exts.append(extensions.ResourceExtension(
             LOADBALANCER_AGENT, controller, parent,
-            path_prefix=plugin_const.
-            COMMON_PREFIXES[plugin_const.LOADBALANCER]))
+            path_prefix=loadbalancer.LOADBALANCER_PREFIX))
         return exts
 
     def get_extended_resources(self, version):

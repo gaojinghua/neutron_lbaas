@@ -13,7 +13,9 @@
 #    under the License.
 
 
-from neutron.common import exceptions
+from neutron_lib import exceptions
+
+from neutron_lbaas._i18n import _
 
 
 class RadwareLBaasException(exceptions.NeutronException):

@@ -12,15 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import uuid
-
-from neutron.common import exceptions as n_exc
 from neutron.extensions import portbindings
-from neutron.i18n import _LW
 from neutron.plugins.common import constants
+from neutron_lib import exceptions as n_exc
 from oslo_log import log as logging
 import oslo_messaging as messaging
 
+from neutron_lbaas._i18n import _, _LW
 from neutron_lbaas.db.loadbalancer import loadbalancer_dbv2
 from neutron_lbaas.db.loadbalancer import models as db_models
 from neutron_lbaas.services.loadbalancer import data_models
@@ -166,8 +164,6 @@ class LoadBalancerCallbacks(object):
             return
 
         port['admin_state_up'] = True
-        port['device_owner'] = 'neutron:' + constants.LOADBALANCERV2
-        port['device_id'] = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(host)))
         port[portbindings.HOST_ID] = host
         self.plugin.db._core_plugin.update_port(
             context,

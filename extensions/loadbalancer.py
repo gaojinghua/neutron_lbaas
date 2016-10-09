@@ -22,10 +22,16 @@ from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.api.v2 import resource_helper
-from neutron.common import exceptions as nexception
 from neutron import manager
 from neutron.plugins.common import constants
 from neutron.services import service_base
+from neutron_lib import exceptions as nexception
+
+from neutron_lbaas._i18n import _
+from neutron_lbaas.extensions import loadbalancerv2
+from neutron_lbaas.services.loadbalancer import constants as lb_const
+
+LOADBALANCER_PREFIX = "/lb"
 
 
 # Loadbalancer Exceptions
@@ -94,6 +100,10 @@ class MemberExists(nexception.NeutronException):
                 "already present in pool %(pool)s")
 
 
+attr.validators['type:connection_limit'] = (
+    loadbalancerv2._validate_connection_limit)
+
+
 RESOURCE_ATTRIBUTE_MAP = {
     'vips': {
         'id': {'allow_post': False, 'allow_put': False,
@@ -144,7 +154,9 @@ RESOURCE_ATTRIBUTE_MAP = {
                                                         'required': False}}},
                                 'is_visible': True},
         'connection_limit': {'allow_post': True, 'allow_put': True,
-                             'default': -1,
+                             'validate': {'type:connection_limit':
+                                          lb_const.MIN_CONNECT_VALUE},
+                             'default': lb_const.MIN_CONNECT_VALUE,
                              'convert_to': attr.convert_to_int,
                              'is_visible': True},
         'admin_state_up': {'allow_post': True, 'allow_put': True,
@@ -166,6 +178,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'required_by_policy': True,
                       'is_visible': True},
         'vip_id': {'allow_post': False, 'allow_put': False,
+                   'validate': {'type:uuid': None},
                    'is_visible': True},
         'name': {'allow_post': True, 'allow_put': True,
                  'validate': {'type:string': None},
@@ -378,7 +391,7 @@ class Loadbalancer(extensions.ExtensionDescriptor):
             resource = extensions.ResourceExtension(
                 collection_name,
                 controller, parent,
-                path_prefix=constants.COMMON_PREFIXES[constants.LOADBALANCER],
+                path_prefix=LOADBALANCER_PREFIX,
                 attr_map=params)
             resources.append(resource)
 

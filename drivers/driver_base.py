@@ -12,8 +12,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from functools import wraps
+
+from neutron import context as ncontext
+from oslo_log import log as logging
+from oslo_utils import excutils
+
+from neutron_lbaas.common import exceptions
 from neutron_lbaas.db.loadbalancer import models
 from neutron_lbaas.drivers import driver_mixins
+from neutron_lbaas.services.loadbalancer import constants
+
+
+LOG = logging.getLogger(__name__)
 
 
 class NotImplementedManager(object):
@@ -37,20 +48,60 @@ class LoadBalancerBaseDriver(object):
     the various load balancer objects.
     """
 
+    model_map = {constants.LOADBALANCER_EVENT: models.LoadBalancer,
+                 constants.LISTENER_EVENT: models.Listener,
+                 constants.POOL_EVENT: models.PoolV2,
+                 constants.MEMBER_EVENT: models.MemberV2}
+
     load_balancer = NotImplementedManager()
     listener = NotImplementedManager()
     pool = NotImplementedManager()
     member = NotImplementedManager()
     health_monitor = NotImplementedManager()
+    l7policy = NotImplementedManager()
+    l7rule = NotImplementedManager()
 
     def __init__(self, plugin):
         self.plugin = plugin
+
+    def handle_streamed_event(self, container):
+        # TODO(crc32): update_stats will be implemented here in the future
+        if container.info_type not in LoadBalancerBaseDriver.model_map:
+            if container.info_type == constants.LISTENER_STATS_EVENT:
+                return
+            else:
+                exc = exceptions.ModelMapException(
+                    target_name=container.info_type)
+                raise exc
+        else:
+            model_class = LoadBalancerBaseDriver.model_map[
+                container.info_type]
+            context = ncontext.get_admin_context()
+            self.plugin.db.update_status(context, model_class,
+                                         container.info_id,
+                                         **container.info_payload)
 
 
 class BaseLoadBalancerManager(driver_mixins.BaseRefreshMixin,
                               driver_mixins.BaseStatsMixin,
                               driver_mixins.BaseManagerMixin):
     model_class = models.LoadBalancer
+
+    @property
+    def allocates_vip(self):
+        """Does this driver need to allocate its own virtual IPs"""
+        return False
+
+    def create_and_allocate_vip(self, context, obj):
+        """Create the load balancer and allocate a VIP
+
+        If this method is implemented AND allocates_vip returns True, then
+        this method will be called instead of the create method.  Any driver
+        that implements this method is responsible for allocating a virtual IP
+        and updating at least the vip_address attribute in the loadbalancer
+        database table.
+        """
+        raise NotImplementedError
 
     @property
     def db_delete_method(self):
@@ -87,3 +138,37 @@ class BaseHealthMonitorManager(driver_mixins.BaseManagerMixin):
     @property
     def db_delete_method(self):
         return self.driver.plugin.db.delete_healthmonitor
+
+
+class BaseL7PolicyManager(driver_mixins.BaseManagerMixin):
+    model_class = models.L7Policy
+
+    @property
+    def db_delete_method(self):
+        return self.driver.plugin.db.delete_l7policy
+
+
+class BaseL7RuleManager(driver_mixins.BaseManagerMixin):
+    model_class = models.L7Rule
+
+    @property
+    def db_delete_method(self):
+        return self.driver.plugin.db.delete_l7policy_rule
+
+
+# A decorator for wrapping driver operations, which will automatically
+# set the neutron object's status based on whether it sees an exception
+
+def driver_op(func):
+    @wraps(func)
+    def func_wrapper(*args, **kwargs):
+        d = (func.__name__ == 'delete')
+        try:
+            r = func(*args, **kwargs)
+            args[0].successful_completion(
+                args[1], args[2], delete=d)
+            return r
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                args[0].failed_completion(args[1], args[2])
+    return func_wrapper

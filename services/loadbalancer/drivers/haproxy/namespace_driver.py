@@ -19,15 +19,14 @@ import socket
 import netaddr
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import exceptions
 from neutron.common import utils as n_utils
-from neutron.i18n import _LE, _LW
 from neutron.plugins.common import constants
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
-from oslo_utils import importutils
 
+from neutron_lbaas._i18n import _, _LE, _LW
 from neutron_lbaas.services.loadbalancer.agent import agent_device_driver
 from neutron_lbaas.services.loadbalancer import constants as lb_const
 from neutron_lbaas.services.loadbalancer.drivers.haproxy import cfg as hacfg
@@ -68,14 +67,16 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         self.conf = conf
         self.state_path = conf.haproxy.loadbalancer_state_path
         try:
-            vif_driver = importutils.import_object(conf.interface_driver, conf)
+            vif_driver_class = n_utils.load_class_by_alias_or_classname(
+                'neutron.interface_drivers',
+                conf.interface_driver)
         except ImportError:
             with excutils.save_and_reraise_exception():
                 msg = (_('Error importing interface driver: %s')
                        % conf.interface_driver)
                 LOG.error(msg)
 
-        self.vif_driver = vif_driver
+        self.vif_driver = vif_driver_class(conf)
         self.plugin_rpc = plugin_rpc
         self.pool_to_port_id = {}
 
@@ -87,7 +88,8 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
         pool_id = logical_config['pool']['id']
         namespace = get_ns_name(pool_id)
 
-        self._plug(namespace, logical_config['vip']['port'])
+        self._plug(namespace, logical_config['vip']['port'],
+                   logical_config['vip']['address'])
         self._spawn(logical_config)
 
     def update(self, logical_config):
@@ -173,7 +175,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             pool_stats['members'] = self._get_servers_stats(parsed_stats)
             return pool_stats
         else:
-            LOG.warn(_LW('Stats socket not found for pool %s'), pool_id)
+            LOG.warning(_LW('Stats socket not found for pool %s'), pool_id)
             return {}
 
     def _get_backend_stats(self, parsed_stats):
@@ -215,7 +217,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
 
             return self._parse_stats(raw_stats)
         except socket.error as e:
-            LOG.warn(_LW('Error while connecting to stats socket: %s'), e)
+            LOG.warning(_LW('Error while connecting to stats socket: %s'), e)
             return {}
 
     def _parse_stats(self, raw_stats):
@@ -241,7 +243,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
                 os.makedirs(conf_dir, 0o755)
         return os.path.join(conf_dir, kind)
 
-    def _plug(self, namespace, port, reuse_existing=True):
+    def _plug(self, namespace, port, vip_address, reuse_existing=True):
         self.plugin_rpc.plug_vip_port(port['id'])
         interface_name = self.vif_driver.get_device_name(Wrap(port))
 
@@ -265,6 +267,12 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
             for ip in port['fixed_ips']
         ]
         self.vif_driver.init_l3(interface_name, cidrs, namespace=namespace)
+
+        # Haproxy socket binding to IPv6 VIP address will fail if this address
+        # is not yet ready(i.e tentative address).
+        if netaddr.IPAddress(vip_address).version == 6:
+            device = ip_lib.IPDevice(interface_name, namespace=namespace)
+            device.addr.wait_until_address_ready(vip_address)
 
         gw_ip = port['fixed_ips'][0]['subnet'].get('gateway_ip')
 
@@ -317,7 +325,7 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
     def deploy_instance(self, logical_config):
         """Deploys loadbalancer if necessary
 
-        :return: True if loadbalancer was deployed, False otherwise
+        :returns: True if loadbalancer was deployed, False otherwise
         """
         # do actual deploy only if vip and pool are configured and active
         if not logical_config or not self._is_active(logical_config):

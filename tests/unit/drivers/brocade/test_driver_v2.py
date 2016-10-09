@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2014 Brocade Communications Systems, Inc.
 # All Rights Reserved.
 #
@@ -80,10 +78,11 @@ class TestBrocadeLoadBalancerDriver(
         id = 'name-001'
         lb = data_models.LoadBalancer(id=id)
         listener = data_models.Listener(id=id, loadbalancer=lb)
-        pool = data_models.Pool(id=id, listener=listener)
+        pool = data_models.Pool(id=id, loadbalancer=lb)
         member = data_models.Member(id=id, pool=pool)
         hm = data_models.HealthMonitor(id=id, pool=pool)
         lb.listeners = [listener]
+        lb.pools = [pool]
         listener.default_pool = pool
         pool.members = [member]
         pool.healthmonitor = hm

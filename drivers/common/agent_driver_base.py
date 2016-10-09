@@ -12,22 +12,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
 from neutron.db import agents_db
 from neutron.services import provider_configuration as provconf
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
-from oslo_log import log as logging
 import oslo_messaging as messaging
 from oslo_utils import importutils
 
+from neutron_lbaas._i18n import _
 from neutron_lbaas.drivers.common import agent_callbacks
 from neutron_lbaas.drivers import driver_base
 from neutron_lbaas.extensions import lbaas_agentschedulerv2
 from neutron_lbaas.services.loadbalancer import constants as lb_const
 from neutron_lbaas.services.loadbalancer import data_models
 
-LOG = logging.getLogger(__name__)
 
 LB_SCHEDULERS = 'loadbalancer_schedulers'
 
@@ -217,26 +216,26 @@ class PoolManager(driver_base.BasePoolManager):
     def update(self, context, old_pool, pool):
         super(PoolManager, self).update(context, old_pool, pool)
         agent = self.driver.get_loadbalancer_agent(
-            context, pool.listener.loadbalancer.id)
+            context, pool.loadbalancer.id)
         self.driver.agent_rpc.update_pool(context, old_pool, pool,
                                           agent['host'])
 
     def create(self, context, pool):
-        super(PoolManager, self).delete(context, pool)
+        super(PoolManager, self).create(context, pool)
         agent = self.driver.get_loadbalancer_agent(
-            context, pool.listener.loadbalancer.id)
+            context, pool.loadbalancer.id)
         self.driver.agent_rpc.create_pool(context, pool, agent['host'])
 
     def delete(self, context, pool):
         super(PoolManager, self).delete(context, pool)
         agent = self.driver.get_loadbalancer_agent(
-            context, pool.listener.loadbalancer.id)
+            context, pool.loadbalancer.id)
         # TODO(blogan): Rethink deleting from the database and updating the lb
         # status here. May want to wait until the agent actually deletes it.
         # Doing this now to keep what v1 had.
         self.driver.plugin.db.delete_pool(context, pool.id)
         self.driver.plugin.db.update_loadbalancer_provisioning_status(
-            context, pool.listener.loadbalancer.id)
+            context, pool.loadbalancer.id)
         self.driver.agent_rpc.delete_pool(context, pool, agent['host'])
 
 
@@ -245,26 +244,26 @@ class MemberManager(driver_base.BaseMemberManager):
     def update(self, context, old_member, member):
         super(MemberManager, self).update(context, old_member, member)
         agent = self.driver.get_loadbalancer_agent(
-            context, member.pool.listener.loadbalancer.id)
+            context, member.pool.loadbalancer.id)
         self.driver.agent_rpc.update_member(context, old_member, member,
                                             agent['host'])
 
     def create(self, context, member):
         super(MemberManager, self).create(context, member)
         agent = self.driver.get_loadbalancer_agent(
-            context, member.pool.listener.loadbalancer.id)
+            context, member.pool.loadbalancer.id)
         self.driver.agent_rpc.create_member(context, member, agent['host'])
 
     def delete(self, context, member):
         super(MemberManager, self).delete(context, member)
         agent = self.driver.get_loadbalancer_agent(
-            context, member.pool.listener.loadbalancer.id)
+            context, member.pool.loadbalancer.id)
         # TODO(blogan): Rethink deleting from the database and updating the lb
         # status here. May want to wait until the agent actually deletes it.
         # Doing this now to keep what v1 had.
         self.driver.plugin.db.delete_pool_member(context, member.id)
         self.driver.plugin.db.update_loadbalancer_provisioning_status(
-            context, member.pool.listener.loadbalancer.id)
+            context, member.pool.loadbalancer.id)
         self.driver.agent_rpc.delete_member(context, member, agent['host'])
 
 
@@ -274,27 +273,27 @@ class HealthMonitorManager(driver_base.BaseHealthMonitorManager):
         super(HealthMonitorManager, self).update(
             context, old_healthmonitor, healthmonitor)
         agent = self.driver.get_loadbalancer_agent(
-            context, healthmonitor.pool.listener.loadbalancer.id)
+            context, healthmonitor.pool.loadbalancer.id)
         self.driver.agent_rpc.update_healthmonitor(
             context, old_healthmonitor, healthmonitor, agent['host'])
 
     def create(self, context, healthmonitor):
         super(HealthMonitorManager, self).create(context, healthmonitor)
         agent = self.driver.get_loadbalancer_agent(
-            context, healthmonitor.pool.listener.loadbalancer.id)
+            context, healthmonitor.pool.loadbalancer.id)
         self.driver.agent_rpc.create_healthmonitor(
             context, healthmonitor, agent['host'])
 
     def delete(self, context, healthmonitor):
         super(HealthMonitorManager, self).delete(context, healthmonitor)
         agent = self.driver.get_loadbalancer_agent(
-            context, healthmonitor.pool.listener.loadbalancer.id)
+            context, healthmonitor.pool.loadbalancer.id)
         # TODO(blogan): Rethink deleting from the database and updating the lb
         # status here. May want to wait until the agent actually deletes it.
         # Doing this now to keep what v1 had.
         self.driver.plugin.db.delete_healthmonitor(context, healthmonitor.id)
         self.driver.plugin.db.update_loadbalancer_provisioning_status(
-            context, healthmonitor.pool.listener.loadbalancer.id)
+            context, healthmonitor.pool.loadbalancer.id)
         self.driver.agent_rpc.delete_healthmonitor(
             context, healthmonitor, agent['host'])
 
@@ -318,7 +317,13 @@ class AgentDriverBase(driver_base.LoadBalancerBaseDriver):
 
         self.agent_rpc = LoadBalancerAgentApi(lb_const.LOADBALANCER_AGENTV2)
 
-        self._set_callbacks_on_plugin()
+        self.agent_endpoints = [
+            agent_callbacks.LoadBalancerCallbacks(self.plugin),
+            agents_db.AgentExtRpcCallback(self.plugin.db)
+        ]
+
+        self.conn = None
+
         # Setting this on the db because the plugin no longer inherts from
         # database classes, the db does.
         self.plugin.db.agent_notifiers.update(
@@ -329,21 +334,16 @@ class AgentDriverBase(driver_base.LoadBalancerBaseDriver):
         self.loadbalancer_scheduler = importutils.import_object(
             lb_sched_driver)
 
-    def _set_callbacks_on_plugin(self):
+    def start_rpc_listeners(self):
         # other agent based plugin driver might already set callbacks on plugin
         if hasattr(self.plugin, 'agent_callbacks'):
             return
 
-        self.plugin.agent_endpoints = [
-            agent_callbacks.LoadBalancerCallbacks(self.plugin),
-            agents_db.AgentExtRpcCallback(self.plugin.db)
-        ]
-        self.plugin.conn = n_rpc.create_connection(new=True)
-        self.plugin.conn.create_consumer(
-            lb_const.LOADBALANCER_PLUGINV2,
-            self.plugin.agent_endpoints,
-            fanout=False)
-        self.plugin.conn.consume_in_threads()
+        self.conn = n_rpc.create_connection()
+        self.conn.create_consumer(lb_const.LOADBALANCER_PLUGINV2,
+                                  self.agent_endpoints,
+                                  fanout=False)
+        return self.conn.consume_in_threads()
 
     def get_loadbalancer_agent(self, context, loadbalancer_id):
         agent = self.plugin.db.get_agent_hosting_loadbalancer(
