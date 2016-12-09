@@ -69,6 +69,7 @@ def upgrade():
         sa.Column(u'healthmonitor_id', sa.String(36), nullable=True),
         sa.Column(u'status', sa.String(16), nullable=False),
         sa.Column(u'admin_state_up', sa.Boolean(), nullable=False),
+        sa.Column(u'create_time', sa.DateTime(True), nullable=True),
         sa.PrimaryKeyConstraint(u'id'),
         sa.UniqueConstraint(u'healthmonitor_id'),
         sa.ForeignKeyConstraint([u'healthmonitor_id'],
@@ -112,6 +113,7 @@ def upgrade():
         sa.Column(u'vip_address', sa.String(36), nullable=True),
         sa.Column(u'status', sa.String(16), nullable=False),
         sa.Column(u'admin_state_up', sa.Boolean(), nullable=False),
+        sa.Column(u'create_time', sa.DateTime(True), nullable=True),
         sa.ForeignKeyConstraint([u'vip_port_id'], [u'ports.id'],
                                 name=u'fk_lbaas_loadbalancers_ports_id'),
         sa.PrimaryKeyConstraint(u'id')
@@ -130,6 +132,7 @@ def upgrade():
         sa.Column(u'default_pool_id', sa.String(36), nullable=True),
         sa.Column(u'status', sa.String(16), nullable=False),
         sa.Column(u'admin_state_up', sa.Boolean(), nullable=False),
+        sa.Column(u'create_time', sa.DateTime(True), nullable=True),
         sa.ForeignKeyConstraint([u'loadbalancer_id'],
                                 [u'lbaas_loadbalancers.id']),
         sa.ForeignKeyConstraint([u'default_pool_id'],

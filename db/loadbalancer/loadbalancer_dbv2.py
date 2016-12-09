@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from datetime import datetime
 import re
 
 from neutron.api.v2 import attributes
@@ -160,6 +161,14 @@ class LoadBalancerPluginDbv2(base_db.CommonDbMixin,
             if model == models.LoadBalancer:
                 db_lb = self._get_resource(context, model, id, for_update=True)
             else:
+                if model == models.PoolV2:
+                    pool = self._get_resource(context, model, id)
+                    if pool.healthmonitor and\
+                       status == constants.PENDING_DELETE:
+                        raise loadbalancerv2.EntityInUse(
+                            entity_using=models.HealthMonitorV2.NAME,
+                            id=pool.healthmonitor.id,
+                            entity_in_use=models.PoolV2.NAME)
                 db_lb_child = self._get_resource(context, model, id)
                 db_lb = self._get_resource(context, models.LoadBalancer,
                                            db_lb_child.root_loadbalancer.id)
@@ -213,6 +222,7 @@ class LoadBalancerPluginDbv2(base_db.CommonDbMixin,
             lb_db = models.LoadBalancer(**loadbalancer)
             context.session.add(lb_db)
             context.session.flush()
+            lb_db.create_time = datetime.now()
             lb_db.stats = self._create_loadbalancer_stats(
                 context, lb_db.id)
             context.session.add(lb_db)
@@ -393,6 +403,7 @@ class LoadBalancerPluginDbv2(base_db.CommonDbMixin,
                 if 'sni_container_ids' in listener:
                     sni_container_ids = listener.pop('sni_container_ids')
                 listener_db_entry = models.Listener(**listener)
+                listener_db_entry.create_time = datetime.now()
                 for container_id in sni_container_ids:
                     sni = models.SNI(listener_id=listener_db_entry.id,
                                      tls_container_id=container_id)
@@ -488,6 +499,7 @@ class LoadBalancerPluginDbv2(base_db.CommonDbMixin,
 
             session_info = pool.pop('session_persistence')
             pool_db = models.PoolV2(**pool)
+            pool_db.create_time = datetime.now()
 
             if session_info:
                 s_p = self._create_session_persistence_db(session_info,

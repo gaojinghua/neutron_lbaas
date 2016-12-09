@@ -155,6 +155,7 @@ class LoadBalancer(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
     )
     flavor_id = sa.Column(sa.String(36), sa.ForeignKey(
         'flavors.id', name='fk_lbaas_loadbalancers_flavors_id'))
+    create_time = sa.Column(sa.DateTime(True))
 
     @property
     def root_loadbalancer(self):
@@ -203,6 +204,7 @@ class PoolV2(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
         LoadBalancer, uselist=False,
         backref=orm.backref("pools", uselist=True),
         lazy='joined')
+    create_time = sa.Column(sa.DateTime(True))
 
     @property
     def root_loadbalancer(self):
@@ -366,6 +368,7 @@ class Listener(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
         foreign_keys=[L7Policy.listener_id],
         cascade="all, delete-orphan",
         backref=orm.backref("listener"))
+    create_time = sa.Column(sa.DateTime(True))
 
     @property
     def root_loadbalancer(self):

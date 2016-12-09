@@ -361,11 +361,12 @@ class HealthMonitor(BaseDataModel):
 
 class Pool(BaseDataModel):
 
+    #Modified by mall2, Bugzilla-76457, add 'create_time', 2016-12-6
     fields = ['id', 'tenant_id', 'name', 'description', 'healthmonitor_id',
               'protocol', 'lb_algorithm', 'admin_state_up', 'operating_status',
               'provisioning_status', 'members', 'healthmonitor',
               'session_persistence', 'loadbalancer_id', 'loadbalancer',
-              'listener', 'listeners', 'l7_policies']
+              'listener', 'listeners', 'l7_policies', 'create_time']
 
     # Map deprecated attribute names to new ones.
     attr_mapping = {'sessionpersistence': 'session_persistence'}
@@ -376,7 +377,7 @@ class Pool(BaseDataModel):
                  provisioning_status=None, members=None, healthmonitor=None,
                  session_persistence=None, loadbalancer_id=None,
                  loadbalancer=None, listener=None, listeners=None,
-                 l7_policies=None):
+                 l7_policies=None, create_time=None):
         self.id = id
         self.tenant_id = tenant_id
         self.name = name
@@ -398,6 +399,7 @@ class Pool(BaseDataModel):
         self.listener = listener
         self.listeners = listeners or []
         self.l7_policies = l7_policies or []
+        self.create_time = create_time
 
     def attached_to_loadbalancer(self):
         return bool(self.loadbalancer)
@@ -634,7 +636,7 @@ class Listener(BaseDataModel):
                  protocol_port=None, connection_limit=None,
                  admin_state_up=None, provisioning_status=None,
                  operating_status=None, default_pool=None, loadbalancer=None,
-                 l7_policies=None):
+                 l7_policies=None, create_time=None):
         self.id = id
         self.tenant_id = tenant_id
         self.name = name
@@ -652,6 +654,7 @@ class Listener(BaseDataModel):
         self.default_pool = default_pool
         self.loadbalancer = loadbalancer
         self.l7_policies = l7_policies or []
+        self.create_time = create_time
 
     def attached_to_loadbalancer(self):
         return bool(self.loadbalancer)
@@ -692,16 +695,18 @@ class Listener(BaseDataModel):
 
 class LoadBalancer(BaseDataModel):
 
+    #Modified by mall2, Bugzilla-76457, add 'create_time', 2016-12-6
     fields = ['id', 'tenant_id', 'name', 'description', 'vip_subnet_id',
               'vip_port_id', 'vip_address', 'provisioning_status',
               'operating_status', 'admin_state_up', 'vip_port', 'stats',
-              'provider', 'listeners', 'pools', 'flavor_id']
+              'provider', 'listeners', 'pools', 'flavor_id', 'create_time']
 
     def __init__(self, id=None, tenant_id=None, name=None, description=None,
                  vip_subnet_id=None, vip_port_id=None, vip_address=None,
                  provisioning_status=None, operating_status=None,
                  admin_state_up=None, vip_port=None, stats=None,
-                 provider=None, listeners=None, pools=None, flavor_id=None):
+                 provider=None, listeners=None, pools=None,
+                 flavor_id=None, create_time=None):
         self.id = id
         self.tenant_id = tenant_id
         self.name = name
@@ -718,6 +723,7 @@ class LoadBalancer(BaseDataModel):
         self.listeners = listeners or []
         self.flavor_id = flavor_id
         self.pools = pools or []
+        self.create_time = create_time
 
     def attached_to_loadbalancer(self):
         return True

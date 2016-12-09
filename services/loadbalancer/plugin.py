@@ -603,16 +603,21 @@ class LoadBalancerPluginv2(loadbalancerv2.LoadBalancerPluginBaseV2):
 
     def delete_loadbalancer(self, context, id):
         old_lb = self.db.get_loadbalancer(context, id)
-        if old_lb.listeners:
-            raise loadbalancerv2.EntityInUse(
-                entity_using=models.Listener.NAME,
-                id=old_lb.listeners[0].id,
-                entity_in_use=models.LoadBalancer.NAME)
+        #begin: modified by mall2, Bugzilla-76167, 2016-12-6
+        #if old_lb.listeners:
+        #    raise loadbalancerv2.EntityInUse(
+        #        entity_using=models.Listener.NAME,
+        #        id=old_lb.listeners[0].id,
+        #        entity_in_use=models.LoadBalancer.NAME)
         if old_lb.pools:
             raise loadbalancerv2.EntityInUse(
                 entity_using=models.PoolV2.NAME,
                 id=old_lb.pools[0].id,
                 entity_in_use=models.LoadBalancer.NAME)
+        if old_lb.listeners:
+            for listener in old_lb.listeners:
+                self.delete_listener(context, listener.id)
+        #end: modified by mall2, Bugzilla-76167, 2016-12-6
         self.db.test_and_set_status(context, models.LoadBalancer, id,
                                     constants.PENDING_DELETE)
         driver = self._get_driver_for_provider(old_lb.provider.provider_name)

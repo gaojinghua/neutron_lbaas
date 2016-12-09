@@ -77,7 +77,7 @@ class LbaasAgentManager(periodic_task.PeriodicTasks):
         self.admin_state_up = True
 
         self._setup_state_rpc()
-        self.needs_resync = False
+        self.needs_resync = True
         # pool_id->device_driver_name mapping used to store known instances
         self.instance_mapping = {}
 

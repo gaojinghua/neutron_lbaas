@@ -185,7 +185,9 @@ RESOURCE_ATTRIBUTE_MAP = {
         'flavor_id': {'allow_post': True, 'allow_put': False,
                       'is_visible': True,
                       'validate': {'type:string': attr.NAME_MAX_LEN},
-                      'default': attr.ATTR_NOT_SPECIFIED}
+                      'default': attr.ATTR_NOT_SPECIFIED},
+        'create_time': {'allow_post': False, 'allow_put': False,
+                        'is_visible': True}
     },
     'listeners': {
         'id': {'allow_post': False, 'allow_put': False,
@@ -238,7 +240,9 @@ RESOURCE_ATTRIBUTE_MAP = {
         'admin_state_up': {'allow_post': True, 'allow_put': True,
                            'default': True,
                            'convert_to': attr.convert_to_boolean,
-                           'is_visible': True}
+                           'is_visible': True},
+        'create_time': {'allow_post': False, 'allow_put': False,
+                        'is_visible': True}
     },
     'pools': {
         'id': {'allow_post': False, 'allow_put': False,
@@ -289,7 +293,9 @@ RESOURCE_ATTRIBUTE_MAP = {
         'admin_state_up': {'allow_post': True, 'allow_put': True,
                            'default': True,
                            'convert_to': attr.convert_to_boolean,
-                           'is_visible': True}
+                           'is_visible': True},
+        'create_time': {'allow_post': False, 'allow_put': False,
+                        'is_visible': True}
     },
     'healthmonitors': {
         'id': {'allow_post': False, 'allow_put': False,
